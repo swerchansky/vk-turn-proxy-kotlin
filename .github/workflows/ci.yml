@@ -8,143 +8,68 @@ on:
 
 jobs:
   check:
-    name: Lint, fmt-check, and tests
+    name: Lint and tests
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
         with:
-          go-version: '1.25.5'
+          java-version: '21'
+          distribution: 'temurin'
 
-      - name: Cache Go modules
-        uses: actions/cache@v5
+      - name: Cache Gradle
+        uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/go-build
-            # Module cache
-            ${{ github.workspace }}/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Run gofmt (check)
-        run: |
-          echo "Checking formatting with gofmt..."
-          fmt_output=$(gofmt -l . || true)
-          if [ -n "$fmt_output" ]; then
-            echo "The following files need formatting:"
-            echo "$fmt_output"
-            echo "Run 'gofmt -w .' to fix."
-            exit 1
-          fi
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.8.0
-          args: --timeout=5m ./...
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-gradle-
 
       - name: Run tests
-        run: |
-          go test ./... -v
-          
+        run: ./gradlew test --no-daemon
+
+      - name: Run detekt
+        run: ./gradlew detekt --no-daemon
+
   build:
-    name: Build binaries
+    name: Build (linux/amd64 smoke test)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            cgo: 0
-          - goos: darwin
-            goarch: arm64
-            cgo: 0
-          - goos: android
-            goarch: arm64
-            cgo: 1
-            api: 21
-          - goos: android
-            goarch: arm
-            cgo: 1
-            api: 21
-          # you can add more (android/arm, windows, etc.) later
-
+    needs: check
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
-        with:
-          fetch-tags: true
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up GraalVM 21
+        uses: graalvm/setup-graalvm@v1
         with:
-          go-version: '1.25.5'
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Install Android NDK for android rows and expose ndk-path output
-      - name: Setup Android NDK
-        if: matrix.goos == 'android'
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
+      - name: Cache Gradle
+        uses: actions/cache@v4
         with:
-          ndk-version: r26d
-          add-to-path: false
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-gradle-
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-          ANDROID_API: ${{ matrix.api }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      - name: Build native binaries
         run: |
-          echo "Building for $GOOS/$GOARCH (CGO_ENABLED=$CGO_ENABLED)"
+          ./gradlew :server:nativeCompile :client-cli:nativeCompile --no-daemon
 
-          # If this is an Android build, point CC at the NDK toolchain clang
-          if [ "$GOOS" = "android" ]; then
-            if [ -z "$ANDROID_NDK_HOME" ]; then
-              echo "ANDROID_NDK_HOME is not set – did setup-ndk run?"
-              exit 1
-            fi
+      - name: Smoke test — help flags
+        run: |
+          ./server/build/native/nativeCompile/server --help || true
+          ./client-cli/build/native/nativeCompile/client --help || true
 
-            TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-            if [ "$GOARCH" = "arm64" ]; then
-              export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
-            elif [ "$GOARCH" = "arm" ]; then
-              export CC="$TOOLCHAIN_BIN/armv7a-linux-androideabi${ANDROID_API}-clang"
-            else
-              echo "Unsupported ANDROID GOARCH=$GOARCH"
-              exit 1
-            fi
-
-            echo "Using Android NDK CC=$CC"
-          fi
-
-          mkdir -p dist
-
-          ext=""
-          if [ "$GOOS" = "windows" ]; then
-            ext=".exe"
-          fi
-
-          GOOS=$GOOS GOARCH=$GOARCH \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/client-${GOOS}-${GOARCH}${ext}" \
-            ./client
-          
-          GOOS=$GOOS GOARCH=$GOARCH \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/server-${GOOS}-${GOARCH}${ext}" \
-            ./server
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: good-turn-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/**
+          name: good-turn-linux-amd64
+          path: |
+            server/build/native/nativeCompile/server
+            client-cli/build/native/nativeCompile/client

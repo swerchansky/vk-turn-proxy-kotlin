@@ -2,128 +2,110 @@ name: Release
 
 on:
   push:
-    # Trigger on tag pushes. Adjust pattern as needed (e.g. 'v*.*.*')
     tags:
       - '**'
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build binaries
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.os-name }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-            cgo: 0
-          - goos: linux
-            goarch: arm64
-            cgo: 0
-          - goos: linux
-            goarch: 386
-            cgo: 0
-          - goos: linux
-            goarch: arm
-            goarm: '7'
-            cgo: 0
-          - goos: darwin
-            goarch: amd64
-            cgo: 0
-          - goos: darwin
-            goarch: arm64
-            cgo: 0
-          - goos: windows
-            goarch: amd64
-            cgo: 0
-          - goos: windows
-            goarch: 386
-            cgo: 0
-          - goos: android
-            goarch: arm64
-            cgo: 1
-            api: 21
-          - goos: android
-            goarch: arm
-            cgo: 1
-            api: 21
-          - goos: freebsd
-            goarch: amd64
-            cgo: 0
+          # ── Linux x86_64 ──────────────────────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: amd64
+            binary-suffix: ''
+
+          # ── Linux arm64 ───────────────────────────────────────────────────
+          - runner: ubuntu-22.04-arm
+            os-name: linux
+            arch: arm64
+            binary-suffix: ''
+
+          # ── Linux x86 (i386) — via QEMU ───────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: 386
+            binary-suffix: ''
+            qemu: 'i386'
+            graalvm-arch: 'linux-x86'
+
+          # ── Linux armv7 — via QEMU ────────────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: armv7
+            binary-suffix: ''
+            qemu: 'arm'
+            graalvm-arch: 'linux-armv7'
+
+          # ── macOS arm64 (Apple Silicon) ───────────────────────────────────
+          - runner: macos-latest
+            os-name: darwin
+            arch: arm64
+            binary-suffix: ''
+
+          # ── Windows x86_64 ────────────────────────────────────────────────
+          - runner: windows-latest
+            os-name: windows
+            arch: amd64
+            binary-suffix: '.exe'
+
+          # ── Windows x86 ───────────────────────────────────────────────────
+          - runner: windows-latest
+            os-name: windows
+            arch: 386
+            binary-suffix: '.exe'
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up QEMU (for cross-arch builds)
+        if: matrix.qemu != ''
+        uses: docker/setup-qemu-action@v3
         with:
-          go-version: '1.25.5'
+          platforms: ${{ matrix.qemu }}
 
-      # Install Android NDK only for android rows
-      - name: Setup Android NDK
-        if: matrix.goos == 'android'
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
+      - name: Set up GraalVM 21
+        uses: graalvm/setup-graalvm@v1
         with:
-          ndk-version: r26d
-          add-to-path: false
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-          ANDROID_API: ${{ matrix.api }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          VERSION: ${{ github.ref_name }}
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Build native binaries
+        shell: bash
         run: |
-          echo "Building for $GOOS/$GOARCH${GOARM:+/arm$GOARM} (CGO_ENABLED=$CGO_ENABLED)"
+          ./gradlew :server:nativeCompile :client-cli:nativeCompile --no-daemon
 
-          if [ "$GOOS" = "android" ]; then
-            if [ -z "$ANDROID_NDK_HOME" ]; then
-              echo "ANDROID_NDK_HOME is not set – did setup-ndk run?"
-              exit 1
-            fi
-
-            TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-            if [ "$GOARCH" = "arm64" ]; then
-              export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
-            elif [ "$GOARCH" = "arm" ]; then
-              export CC="$TOOLCHAIN_BIN/armv7a-linux-androideabi${ANDROID_API}-clang"
-            else
-              echo "Unsupported ANDROID GOARCH=$GOARCH"
-              exit 1
-            fi
-
-            echo "Using Android NDK CC=$CC"
-          fi
-
+      - name: Collect artifacts
+        shell: bash
+        run: |
           mkdir -p dist
+          OS="${{ matrix.os-name }}"
+          ARCH="${{ matrix.arch }}"
+          EXT="${{ matrix.binary-suffix }}"
 
-          # Set extension for windows
-          if [ "${GOOS}" = "windows" ]; then
-            EXT=.exe
-          else
-            EXT=
-          fi
-
-          GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/client-${GOOS}-${GOARCH}${EXT}" \
-            ./client
-          
-          GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/server-${GOOS}-${GOARCH}${EXT}" \
-            ./server
+          # Paths differ on Windows (.exe extension already set by Gradle)
+          cp server/build/native/nativeCompile/server${EXT}     dist/server-${OS}-${ARCH}${EXT}
+          cp client-cli/build/native/nativeCompile/client${EXT} dist/client-${OS}-${ARCH}${EXT}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
-          name: good-turn-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: good-turn-${{ matrix.os-name }}-${{ matrix.arch }}
           path: dist/**
 
   release:
@@ -133,18 +115,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v7
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          # upload every file in dist/ including nested files
-          files: |
-            dist/**
-          # make the release name/tag the pushed tag
+          files: dist/**
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           overwrite_files: true
