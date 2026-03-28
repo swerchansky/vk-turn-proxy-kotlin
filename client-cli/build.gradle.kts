@@ -18,6 +18,9 @@ dependencies {
 }
 
 graalvmNative {
+    metadataRepository {
+        enabled.set(true)
+    }
     binaries {
         named("main") {
             imageName.set("client")
@@ -37,5 +40,8 @@ graalvmNative {
 tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
+    manifest {
+        attributes["Main-Class"] = "com.github.swerchansky.vkturnproxy.client.ClientMainKt"
+    }
 }
 

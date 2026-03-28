@@ -35,6 +35,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
             body = "client_id=6287487&token_type=messages&client_secret=QbYic1K3lEV5kTGiqlq2" +
                     "&version=1&app_id=6287487",
         )
+        check(resp1["data"] != null) { "Step 1 failed, got: $resp1" }
         val token1 = resp1["data"]!!.jsonObject["access_token"]!!.jsonPrimitive.content
 
         // Step 2: calls token
@@ -42,6 +43,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
             url = "https://api.vk.ru/method/calls.getAnonymousToken?v=5.274&client_id=6287487",
             body = "vk_join_link=https://vk.com/call/join/$link&name=123&access_token=$token1",
         )
+        check(resp2["response"] != null) { "Step 2 failed, got: $resp2" }
         val token2 = resp2["response"]!!.jsonObject["token"]!!.jsonPrimitive.content
 
         // Step 3: OkCDN session
@@ -52,6 +54,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
                     "%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D" +
                     "&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA",
         )
+        check(resp3["session_key"] != null) { "Step 3 failed, got: $resp3" }
         val token3 = resp3["session_key"]!!.jsonPrimitive.content
 
         // Step 4: join conference → TURN creds
@@ -61,6 +64,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
                     "&method=vchat.joinConversationByLink&format=JSON" +
                     "&application_key=CGMMEJLGDIHBABABA&session_key=$token3",
         )
+        check(resp4["turn_server"] != null) { "Step 4 failed, got: $resp4" }
         val turnServer = resp4["turn_server"]!!.jsonObject
         val username = turnServer["username"]!!.jsonPrimitive.content
         val password = turnServer["credential"]!!.jsonPrimitive.content
