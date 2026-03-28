@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":shared"))
     implementation(libs.coroutines.core)
     implementation(libs.clikt)
+    implementation(libs.bouncycastle.bcprov)
 }
 
 graalvmNative {

@@ -16,12 +16,14 @@ import kotlinx.coroutines.runBlocking
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import org.bouncycastle.jce.provider.BouncyCastleProvider
+import java.security.Security
 import java.util.logging.Logger
-import kotlin.system.exitProcess
 
 private val log: Logger = Logger.getLogger("server")
 
 fun main(args: Array<String>) {
+    Security.addProvider(BouncyCastleProvider())
     ServerCommand().main(args)
 }
 

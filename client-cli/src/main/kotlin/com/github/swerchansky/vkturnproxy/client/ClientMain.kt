@@ -30,12 +30,15 @@ import kotlinx.coroutines.runBlocking
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import org.bouncycastle.jce.provider.BouncyCastleProvider
+import java.security.Security
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 
 private val log: Logger = Logger.getLogger("client")
 
 fun main(args: Array<String>) {
+    Security.addProvider(BouncyCastleProvider())
     ClientCommand().main(args)
 }
 

@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.ktor.client.websockets)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)
+    implementation(libs.bouncycastle.bcprov)
 }
 
 graalvmNative {
