@@ -134,7 +134,8 @@ private suspend fun runDtlsTurnConnection(
     val creds = try {
         provider.getCredentials(link)
     } catch (e: Exception) {
-        log.severe("Failed to get TURN credentials: ${e.message}")
+        log.severe("Failed to get TURN credentials: ${e::class.qualifiedName}: ${e.message}")
+        e.printStackTrace()
         return
     }
     val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)

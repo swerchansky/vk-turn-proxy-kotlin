@@ -1,18 +1,13 @@
 package com.github.swerchansky.vkturnproxy.dtls
 
-import org.bouncycastle.asn1.x500.X500Name
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.crypto.util.PrivateKeyFactory
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
-import org.bouncycastle.tls.Certificate
 import org.bouncycastle.tls.CipherSuite
 import org.bouncycastle.tls.DTLSServerProtocol
 import org.bouncycastle.tls.DTLSTransport
+import org.bouncycastle.tls.DatagramTransport
 import org.bouncycastle.tls.DefaultTlsServer
 import org.bouncycastle.tls.HashAlgorithm
 import org.bouncycastle.tls.SignatureAlgorithm
 import org.bouncycastle.tls.SignatureAndHashAlgorithm
-import org.bouncycastle.tls.TlsContext
 import org.bouncycastle.tls.TlsCredentialedSigner
 import org.bouncycastle.tls.TlsExtensionsUtils
 import org.bouncycastle.tls.crypto.TlsCertificate
@@ -21,15 +16,11 @@ import org.bouncycastle.tls.crypto.impl.bc.BcDefaultTlsCredentialedSigner
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCertificate
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto
 import java.io.Closeable
-import java.math.BigInteger
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
-import java.security.KeyPair
-import java.security.KeyPairGenerator
+import java.net.SocketTimeoutException
 import java.security.SecureRandom
-import java.security.spec.ECGenParameterSpec
-import java.util.Date
 import java.util.Hashtable
 
 /**
@@ -56,21 +47,53 @@ class DtlsServer(
 
     /**
      * Blocks until a client connects and completes the DTLS handshake.
+     *
+     * Uses the shared server socket so the client always sends to the same port.
+     * The first received datagram (ClientHello) is replayed into the DTLS handshake.
      */
     fun accept(): DtlsServerConnection {
         val buf = ByteArray(2048)
         while (true) {
+            socket.soTimeout = 0 // block indefinitely for first packet
             val pkt = DatagramPacket(buf, buf.size)
             socket.receive(pkt)
             val clientAddr = InetSocketAddress(pkt.address, pkt.port)
-            val clientSocket = DatagramSocket()
-            clientSocket.connect(clientAddr)
-            val transport = UdpDatagramTransport(clientSocket, clientAddr)
+            val firstPacket = buf.copyOf(pkt.length)
+
+            val transport = object : DatagramTransport {
+                private var firstConsumed = false
+
+                override fun getSendLimit() = 1200
+                override fun getReceiveLimit() = 1200
+
+                override fun send(data: ByteArray, off: Int, len: Int) {
+                    socket.send(DatagramPacket(data, off, len, clientAddr))
+                }
+
+                override fun receive(data: ByteArray, off: Int, len: Int, waitMillis: Int): Int {
+                    if (!firstConsumed) {
+                        firstConsumed = true
+                        val copyLen = minOf(len, firstPacket.size)
+                        firstPacket.copyInto(data, off, 0, copyLen)
+                        return copyLen
+                    }
+                    socket.soTimeout = waitMillis
+                    val incoming = DatagramPacket(data, off, len)
+                    return try {
+                        socket.receive(incoming)
+                        incoming.length
+                    } catch (_: SocketTimeoutException) {
+                        -1
+                    }
+                }
+
+                override fun close() {} // shared socket — do not close
+            }
+
             return try {
                 val dtls = protocol.accept(GoodTurnTlsServer(crypto, cred), transport)
-                DtlsServerConnection(dtls, clientSocket, readTimeoutMs)
+                DtlsServerConnection(dtls, readTimeoutMs)
             } catch (e: Exception) {
-                clientSocket.close()
                 throw e
             }
         }
@@ -81,14 +104,12 @@ class DtlsServer(
 
 class DtlsServerConnection(
     private val dtlsTransport: DTLSTransport,
-    private val socket: DatagramSocket,
     private val readTimeoutMs: Int,
 ) : Closeable {
     fun send(data: ByteArray) = dtlsTransport.send(data, 0, data.size)
     fun receive(buf: ByteArray): Int = dtlsTransport.receive(buf, 0, buf.size, readTimeoutMs)
     override fun close() {
         runCatching { dtlsTransport.close() }
-        runCatching { socket.close() }
     }
 }
 
