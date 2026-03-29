@@ -46,6 +46,7 @@ class MainFragment : BaseFragment() {
             .putString("link", binding.etLink.text.toString())
             .putString("peer", binding.etPeer.text.toString())
             .putString("port", binding.etPort.text.toString())
+            .putString("connections", binding.etConnections.text.toString())
             .putBoolean("udp", binding.switchUdp.isChecked)
             .putBoolean("is_vk", binding.rbVk.isChecked)
             .apply()
@@ -55,6 +56,7 @@ class MainFragment : BaseFragment() {
         binding.etLink.setText(prefs.getString("link", ""))
         binding.etPeer.setText(prefs.getString("peer", ""))
         binding.etPort.setText(prefs.getString("port", ""))
+        binding.etConnections.setText(prefs.getString("connections", "0"))
         binding.switchUdp.isChecked = prefs.getBoolean("udp", false)
         val isVk = prefs.getBoolean("is_vk", true)
         binding.rbVk.isChecked = isVk
@@ -66,6 +68,7 @@ class MainFragment : BaseFragment() {
             val link = binding.etLink.text.toString().trim()
             val peer = binding.etPeer.text.toString().trim()
             val port = binding.etPort.text.toString().trim().toIntOrNull() ?: 9000
+            val n = binding.etConnections.text.toString().trim().toIntOrNull() ?: 0
             val useUdp = binding.switchUdp.isChecked
             val isVk = binding.rbVk.isChecked
 
@@ -84,7 +87,7 @@ class MainFragment : BaseFragment() {
                     ?.substringBefore("?")?.substringBefore("/")?.substringBefore("#") ?: link
             }
 
-            viewModel.connect(rawLink, peer, port, useUdp, isVk)
+            viewModel.connect(rawLink, peer, port, useUdp, isVk, n)
         }
 
         binding.btnDisconnect.setOnClickListener {

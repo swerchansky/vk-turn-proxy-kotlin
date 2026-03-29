@@ -27,6 +27,7 @@ class MainViewModel @Inject constructor(
         listenPort: Int,
         useUdp: Boolean,
         isVk: Boolean,
+        nConnections: Int,
     ) {
         val intent = Intent(app, ProxyService::class.java).apply {
             action = ProxyService.ACTION_START
@@ -35,6 +36,7 @@ class MainViewModel @Inject constructor(
             putExtra(ProxyService.EXTRA_PORT, listenPort)
             putExtra(ProxyService.EXTRA_UDP, useUdp)
             putExtra(ProxyService.EXTRA_IS_VK, isVk)
+            putExtra(ProxyService.EXTRA_N, nConnections)
         }
         app.startForegroundService(intent)
     }

@@ -4,6 +4,7 @@
     <string name="hint_link">Conference link (VK or Yandex)</string>
     <string name="hint_peer">Server address (host:port)</string>
     <string name="hint_port">Listen port</string>
+    <string name="hint_connections">Connections N (0 = auto: 16 VK / 1 Yandex)</string>
     <string name="use_udp">Use UDP for TURN</string>
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
