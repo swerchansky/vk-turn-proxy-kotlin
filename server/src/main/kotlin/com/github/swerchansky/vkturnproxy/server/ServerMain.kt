@@ -6,11 +6,8 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.swerchansky.vkturnproxy.dtls.DtlsServer
 import com.github.swerchansky.vkturnproxy.dtls.DtlsServerConnection
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.net.DatagramPacket
@@ -23,6 +20,10 @@ import java.util.logging.Logger
 private val log: Logger = Logger.getLogger("server")
 
 fun main(args: Array<String>) {
+    val logConfig = object {}.javaClass.classLoader?.getResourceAsStream("logging.properties")
+    if (logConfig != null) {
+        java.util.logging.LogManager.getLogManager().readConfiguration(logConfig)
+    }
     Security.addProvider(BouncyCastleProvider())
     ServerCommand().main(args)
 }
@@ -37,14 +38,6 @@ private class ServerCommand : CliktCommand(name = "server") {
         val listenAddr = parseAddr(listen)
         val connectAddr = parseAddr(connect)
 
-        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-        // Graceful shutdown on SIGTERM / SIGINT
-        Runtime.getRuntime().addShutdownHook(Thread {
-            log.info("Terminating...")
-            scope.cancel()
-        })
-
         val server = DtlsServer(listenAddr)
         log.info("Listening on $listen")
 
@@ -57,9 +50,7 @@ private class ServerCommand : CliktCommand(name = "server") {
                         log.warning("Accept error: ${e.message}")
                         continue
                     }
-                    scope.launch {
-                        handleConnection(conn, connectAddr)
-                    }
+                    launch { handleConnection(conn, connectAddr) }
                 }
             } finally {
                 server.close()
@@ -69,44 +60,61 @@ private class ServerCommand : CliktCommand(name = "server") {
 }
 
 private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSocketAddress) {
-    log.info("Connection established, relaying to $wgAddr")
-    val wgSocket = DatagramSocket().also { it.connect(wgAddr) }
+    log.info("Connection established, relaying to WireGuard at $wgAddr")
+    val wgSocket = DatagramSocket().also {
+        it.connect(wgAddr)
+        it.soTimeout = 30 * 60 * 1000
+    }
+    log.info("WireGuard socket bound to local port ${wgSocket.localPort}, connected to $wgAddr")
     val buf = ByteArray(1600)
     val wgBuf = ByteArray(1600)
 
-    val job1 = CoroutineScope(Dispatchers.IO).launch {
+    coroutineScope {
         // DTLS → WireGuard
-        try {
-            while (true) {
-                val n = conn.receive(buf)
-                if (n < 0) break
-                wgSocket.send(DatagramPacket(buf, n, wgAddr))
+        launch(Dispatchers.IO) {
+            var count = 0
+            try {
+                while (true) {
+                    val n = conn.receive(buf)
+                    if (n < 0) { log.info("DTLS→WG: receive returned -1 (timeout/close) after $count pkts"); break }
+                    count++
+                    if (count <= 5 || count % 100 == 0)
+                        log.info("DTLS→WG pkt #$count ${n}B → WireGuard  hdr=${buf.take(3).joinToString("") { "%02x".format(it) }}")
+                    wgSocket.send(DatagramPacket(buf, n, wgAddr))
+                }
+            } catch (e: Exception) {
+                log.warning("DTLS→WG ended after $count pkts: ${e.javaClass.name}: ${e.message}")
+            } finally {
+                log.info("DTLS→WG: closing wgSocket to unblock WG→DTLS direction")
+                wgSocket.close()
             }
-        } catch (e: Exception) {
-            log.fine("DTLS→WG relay ended: ${e.message}")
         }
-    }
 
-    val job2 = CoroutineScope(Dispatchers.IO).launch {
         // WireGuard → DTLS
-        try {
-            wgSocket.soTimeout = 30 * 60 * 1000 // 30 min
-            while (true) {
-                val pkt = DatagramPacket(wgBuf, wgBuf.size)
-                wgSocket.receive(pkt)
-                conn.send(wgBuf.copyOf(pkt.length))
+        launch(Dispatchers.IO) {
+            var count = 0
+            log.info("WG→DTLS: waiting for first packet from WireGuard on port ${wgSocket.localPort}...")
+            try {
+                while (true) {
+                    val pkt = DatagramPacket(wgBuf, wgBuf.size)
+                    wgSocket.receive(pkt)
+                    count++
+                    if (count <= 5 || count % 100 == 0)
+                        log.info("WG→DTLS pkt #$count ${pkt.length}B from WireGuard  hdr=${wgBuf.take(3).joinToString("") { "%02x".format(it) }}")
+                    conn.send(wgBuf.copyOf(pkt.length))
+                }
+            } catch (e: Exception) {
+                log.warning("WG→DTLS ended after $count pkts: ${e.javaClass.name}: ${e.message}")
+            } finally {
+                log.info("WG→DTLS: closing DTLS conn to unblock DTLS→WG direction")
+                conn.close()
             }
-        } catch (e: Exception) {
-            log.fine("WG→DTLS relay ended: ${e.message}")
         }
     }
 
-    job1.join()
-    job2.cancel()
-    job1.cancel()
     wgSocket.close()
     conn.close()
-    log.info("Connection closed")
+    log.info("Connection fully closed")
 }
 
 private fun parseAddr(addr: String): InetSocketAddress {

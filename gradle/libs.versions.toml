@@ -9,6 +9,15 @@ clikt = "4.4.0"
 graalvm = "0.10.6"
 shadow = "8.3.6"
 detekt = "1.23.8"
+agp = "8.7.3"
+dagger = "2.55"
+cicerone = "7.1"
+androidx-core = "1.13.1"
+androidx-appcompat = "1.7.0"
+material = "1.12.0"
+androidx-lifecycle = "2.8.6"
+androidx-fragment = "1.8.4"
+coroutines-android = "1.10.2"
 
 [libraries]
 # Kotlin
@@ -36,10 +45,26 @@ dnsjava = { module = "dnsjava:dnsjava", version.ref = "dnsjava" }
 # CLI (JVM)
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 
+# Android
+dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
+dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
+cicerone = { module = "com.github.terrakok:cicerone", version.ref = "cicerone" }
+androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+androidx-lifecycle-viewmodel = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "androidx-lifecycle" }
+androidx-lifecycle-livedata = { module = "androidx.lifecycle:lifecycle-livedata-ktx", version.ref = "androidx-lifecycle" }
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "androidx-fragment" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines-android" }
+
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
 graalvm-native = { id = "org.graalvm.buildtools.native", version.ref = "graalvm" }
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }

@@ -8,6 +8,9 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.Timer
+import java.util.TimerTask
+import java.util.logging.Logger
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -29,13 +32,16 @@ class TurnClient private constructor(
     private val transport: TurnTransportJvm,
     private val credentials: TurnCredentials,
     private val addressFamily: RequestedAddressFamily,
+    private val logger: (String) -> Unit = {},
 ) : Closeable {
 
+    private val log = Logger.getLogger("turn-client")
     private var realm: String = ""
     private var nonce: String = ""
     private var allocatedIp: ByteArray = ByteArray(4)
     private var allocatedPort: Int = 0
     private var boundChannel: Int = -1
+    private var refreshTimer: Timer? = null
 
     // ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -46,40 +52,58 @@ class TurnClient private constructor(
             useUdp: Boolean,
             addressFamily: RequestedAddressFamily = RequestedAddressFamily.IPv4,
             connectTimeoutMs: Int = 5_000,
+            logger: (String) -> Unit = {},
         ): TurnClient {
             val transport = if (useUdp) {
                 UdpTurnTransport(serverAddr)
             } else {
                 TcpTurnTransport(serverAddr, connectTimeoutMs)
             }
-            return TurnClient(transport, credentials, addressFamily)
+            return TurnClient(transport, credentials, addressFamily, logger)
         }
     }
 
-    override fun close() = transport.close()
+    override fun close() {
+        refreshTimer?.cancel()
+        refreshTimer = null
+        transport.close()
+        log.info("TURN: closed (relay=${relayAddress()})")
+    }
 
     // ── public API ─────────────────────────────────────────────────────────
 
     /** Allocates a relay socket. Must be called once before send/receive. */
     fun allocate() {
-        // First attempt — server will reply 401 with REALM + NONCE
-        val req1 = buildAllocateRequest(authenticated = false)
+        log.info("TURN alloc: user='${credentials.username}' server=${transport.javaClass.simpleName}")
+
+        val req1 = buildAllocateRequest()
         val resp1 = transport.sendReceive(req1)
             ?: error("TURN Allocate: no response")
+
+        logAttrs("resp1[cls=0x${resp1.cls.hex2()}]", resp1)
 
         if (resp1.cls == StunClass.ERROR) {
             val errCode = parseErrorCode(resp1)
             if (errCode == 401) {
                 realm = resp1.getAttr(StunAttr.REALM)?.decodeToString() ?: ""
                 nonce = resp1.getAttr(StunAttr.NONCE)?.decodeToString() ?: ""
-                val req2 = buildAllocateRequest(authenticated = true)
+                log.info("TURN auth: realm='$realm'")
+
+                val req2 = buildAllocateRequest()
                 addMessageIntegrity(req2)
+                logAttrs("req2[authenticated]", req2)
+
                 val resp2 = transport.sendReceive(req2)
                     ?: error("TURN Allocate (authenticated): no response")
+
+                logAttrs("resp2[cls=0x${resp2.cls.hex2()}]", resp2)
+
                 check(resp2.cls == StunClass.SUCCESS) {
                     "TURN Allocate failed: ${decodeErrorCode(resp2.getAttr(StunAttr.ERROR_CODE))}"
                 }
                 extractRelayAddress(resp2)
+                startRefreshTimer()
+                log.info("TURN allocated relay=${relayAddress()}")
                 return
             }
             error("TURN Allocate failed: ${decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE))}")
@@ -88,6 +112,43 @@ class TurnClient private constructor(
             "TURN Allocate failed: ${decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE))}"
         }
         extractRelayAddress(resp1)
+        startRefreshTimer()
+        log.info("TURN allocated relay=${relayAddress()}")
+    }
+
+    /** Sends a TURN Refresh to keep the allocation alive. */
+    private fun refresh() {
+        try {
+            val req = StunMessage(StunMethod.REFRESH, StunClass.REQUEST)
+            // LIFETIME: 600 seconds (10 minutes)
+            req.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, 0x02, 0x58))
+            addMessageIntegrity(req)
+            val resp = transport.sendReceive(req)
+            if (resp == null) {
+                log.warning("TURN Refresh: no response (allocation may have expired!)")
+                return
+            }
+            if (resp.cls == StunClass.SUCCESS) {
+                log.info("TURN Refresh: OK, allocation kept alive")
+            } else {
+                log.warning("TURN Refresh failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}")
+            }
+        } catch (e: Exception) {
+            log.warning("TURN Refresh exception: ${e.javaClass.name}: ${e.message}")
+        }
+    }
+
+    private fun startRefreshTimer() {
+        // Refresh every 5 minutes (default allocation lifetime is 10 minutes)
+        val intervalMs = 5 * 60 * 1000L
+        val timer = Timer("turn-refresh", true)
+        timer.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                log.info("TURN Refresh: sending keepalive for relay=${relayAddress()}")
+                refresh()
+            }
+        }, intervalMs, intervalMs)
+        refreshTimer = timer
     }
 
     /** Returns the relay address assigned by the TURN server. */
@@ -102,6 +163,8 @@ class TurnClient private constructor(
      */
     fun channelBind(peerIp: ByteArray, peerPort: Int, channel: Int = 0x4000) {
         check(channel in CHANNEL_DATA_MIN until CHANNEL_DATA_MAX) { "Invalid channel number" }
+        val peerStr = peerIp.joinToString(".") { (it.toInt() and 0xFF).toString() } + ":$peerPort"
+        log.info("TURN channelBind: channel=0x${channel.toString(16)} peer=$peerStr")
         boundChannel = channel
 
         val req = StunMessage(StunMethod.CHANNEL_BIND, StunClass.REQUEST)
@@ -118,41 +181,60 @@ class TurnClient private constructor(
         check(resp.cls == StunClass.SUCCESS) {
             "ChannelBind failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}"
         }
+        log.info("TURN channelBind OK: channel=0x${channel.toString(16)} peer=$peerStr")
     }
+
+    /** Sets receive timeout on the underlying transport socket (0 = block forever). */
+    fun setReceiveTimeout(ms: Int) = transport.setReceiveTimeout(ms)
+
+    private var sendCount = 0
+    private var recvCount = 0
 
     /** Sends data via ChannelData framing (requires prior channelBind). */
     fun send(data: ByteArray) {
         check(boundChannel >= 0) { "Must call channelBind before send" }
+        sendCount++
+        if (sendCount <= 5 || sendCount % 100 == 0)
+            log.fine("TURN send #$sendCount ${data.size}B via channel 0x${boundChannel.toString(16)}")
         val frame = StunMessage.encodeChannelData(boundChannel, data)
         transport.sendRaw(frame)
     }
 
     /**
      * Reads the next packet arriving on the relay.
-     * Returns payload bytes, or null for non-data STUN messages.
+     * Returns payload bytes, or null for non-data STUN messages (caller should loop).
      */
     fun receive(): ByteArray? {
         val raw = transport.receiveRaw()
         if (StunMessage.isChannelData(raw)) {
             val (ch, payload) = StunMessage.decodeChannelData(raw) ?: return null
-            if (ch == boundChannel) return payload
+            if (ch == boundChannel) {
+                recvCount++
+                if (recvCount <= 5 || recvCount % 100 == 0)
+                    log.fine("TURN recv #$recvCount ${payload.size}B from channel 0x${ch.toString(16)}")
+                return payload
+            }
+            log.warning("TURN recv: unexpected channel 0x${ch.toString(16)} (bound=0x${boundChannel.toString(16)}), dropping")
+            return null
+        }
+        // Non-channel-data: could be STUN indication or keepalive
+        val msg = StunMessage.decode(raw)
+        if (msg != null) {
+            log.fine("TURN recv: non-ChannelData STUN msg method=0x${msg.method.toString(16)} cls=0x${msg.cls.toString(16)}, skipping")
+        } else {
+            log.warning("TURN recv: unrecognised ${raw.size}B frame (hdr=${raw.take(4).joinToString("") { "%02x".format(it) }}), skipping")
         }
         return null
     }
 
     // ── internals ──────────────────────────────────────────────────────────
 
-    private fun buildAllocateRequest(authenticated: Boolean): StunMessage {
+    private fun buildAllocateRequest(): StunMessage {
         val req = StunMessage(StunMethod.ALLOCATE, StunClass.REQUEST)
         // REQUESTED-TRANSPORT: UDP (17)
         req.addAttr(StunAttr.REQUESTED_TRANSPORT, byteArrayOf(17, 0, 0, 0))
         // REQUESTED-ADDRESS-FAMILY (RFC 6156)
         req.addAttr(StunAttr.REQUESTED_ADDRESS_FAMILY, byteArrayOf(addressFamily.code.toByte(), 0, 0, 0))
-        if (authenticated && realm.isNotEmpty()) {
-            req.addStringAttr(StunAttr.USERNAME, credentials.username)
-            req.addStringAttr(StunAttr.REALM, realm)
-            req.addStringAttr(StunAttr.NONCE, nonce)
-        }
         return req
     }
 
@@ -183,8 +265,37 @@ class TurnClient private constructor(
         val mac = Mac.getInstance("HmacSHA1").apply {
             init(SecretKeySpec(key, "HmacSHA1"))
         }.doFinal(macData)
+        logger("MI: keyInput='${credentials.username}:$realm:***' key=${key.hex()} mac=${mac.hex()}")
+        logger("MI: hmacData(${macData.size}B)=${macData.hex()}")
         msg.addAttr(StunAttr.MESSAGE_INTEGRITY, mac)
     }
+
+    private fun logAttrs(prefix: String, msg: StunMessage) {
+        msg.allAttrs().forEach { (t, v) ->
+            val name = when (t) {
+                StunAttr.USERNAME -> "USERNAME"
+                StunAttr.MESSAGE_INTEGRITY -> "MESSAGE_INTEGRITY"
+                StunAttr.ERROR_CODE -> "ERROR_CODE"
+                StunAttr.REALM -> "REALM"
+                StunAttr.NONCE -> "NONCE"
+                StunAttr.XOR_PEER_ADDRESS -> "XOR_PEER_ADDRESS"
+                StunAttr.XOR_RELAYED_ADDRESS -> "XOR_RELAYED_ADDRESS"
+                StunAttr.REQUESTED_ADDRESS_FAMILY -> "REQUESTED_ADDRESS_FAMILY"
+                StunAttr.REQUESTED_TRANSPORT -> "REQUESTED_TRANSPORT"
+                StunAttr.CHANNEL_NUMBER -> "CHANNEL_NUMBER"
+                else -> "0x${t.toString(16)}"
+            }
+            val display = when (t) {
+                StunAttr.USERNAME, StunAttr.REALM, StunAttr.NONCE -> "'${v.decodeToString()}'"
+                StunAttr.ERROR_CODE -> decodeErrorCode(v)
+                else -> v.hex()
+            }
+            logger("$prefix attr $name = $display")
+        }
+    }
+
+    private fun ByteArray.hex() = joinToString("") { "%02x".format(it) }
+    private fun Int.hex2() = toString(16).padStart(4, '0')
 
     private fun parseErrorCode(msg: StunMessage): Int {
         val attr = msg.getAttr(StunAttr.ERROR_CODE) ?: return 0
@@ -202,6 +313,8 @@ private interface TurnTransportJvm : Closeable {
     fun sendRaw(data: ByteArray)
     /** Receive raw bytes. */
     fun receiveRaw(): ByteArray
+    /** Set socket read timeout (0 = block forever). */
+    fun setReceiveTimeout(ms: Int)
 }
 
 private const val RECEIVE_TIMEOUT_MS = 5_000
@@ -245,6 +358,8 @@ private class TcpTurnTransport(
         readFully(inp, buf)
         return buf
     }
+
+    override fun setReceiveTimeout(ms: Int) { socket.soTimeout = ms }
 
     override fun close() = socket.close()
 
@@ -290,6 +405,8 @@ private class UdpTurnTransport(private val serverAddr: InetSocketAddress) : Turn
         socket.receive(pkt)
         return pkt.data.copyOf(pkt.length)
     }
+
+    override fun setReceiveTimeout(ms: Int) { socket.soTimeout = ms }
 
     override fun close() = socket.close()
 }

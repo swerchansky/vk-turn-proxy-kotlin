@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Good TURN</string>
+    <string name="hint_link">Conference link (VK or Yandex)</string>
+    <string name="hint_peer">Server address (host:port)</string>
+    <string name="hint_port">Listen port</string>
+    <string name="use_udp">Use UDP for TURN</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+</resources>
