@@ -16,8 +16,8 @@ internal class TurnDatagramTransport(
     private var sentCount = 0
     private var recvCount = 0
 
-    override fun getSendLimit(): Int = 1200
-    override fun getReceiveLimit(): Int = 1200
+    override fun getSendLimit(): Int = 1500
+    override fun getReceiveLimit(): Int = 1500
 
     override fun send(data: ByteArray, off: Int, len: Int) {
         sentCount++

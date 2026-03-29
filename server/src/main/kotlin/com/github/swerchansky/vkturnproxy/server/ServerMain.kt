@@ -99,8 +99,10 @@ private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSoc
                     val pkt = DatagramPacket(wgBuf, wgBuf.size)
                     wgSocket.receive(pkt)
                     count++
-                    if (count <= 5 || count % 100 == 0)
-                        log.info("WG→DTLS pkt #$count ${pkt.length}B from WireGuard  hdr=${wgBuf.take(3).joinToString("") { "%02x".format(it) }}")
+                    if (count <= 5 || count % 100 == 0) {
+                        val hdr = wgBuf.take(3).joinToString("") { "%02x".format(it) }
+                        log.info("WG→DTLS pkt #$count ${pkt.length}B from WireGuard  hdr=$hdr")
+                    }
                     conn.send(wgBuf.copyOf(pkt.length))
                 }
             } catch (e: Exception) {
