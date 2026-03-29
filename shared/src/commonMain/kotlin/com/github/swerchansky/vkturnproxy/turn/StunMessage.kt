@@ -6,6 +6,7 @@ internal object StunMethod {
     const val ALLOCATE: Int = 0x0003
     const val REFRESH: Int = 0x0004
     const val CHANNEL_BIND: Int = 0x0009
+    const val CREATE_PERMISSION: Int = 0x0008
 }
 
 internal object StunClass {
@@ -25,6 +26,7 @@ internal object StunAttr {
     const val REQUESTED_ADDRESS_FAMILY: Int = 0x0017
     const val REQUESTED_TRANSPORT: Int = 0x0019
     const val CHANNEL_NUMBER: Int = 0x000C
+    const val LIFETIME: Int = 0x000D
 }
 
 internal const val STUN_MAGIC_COOKIE: Int = 0x2112A442.toInt()
@@ -35,7 +37,7 @@ internal const val CHANNEL_DATA_MAX: Int = 0x7FFF
 
 internal fun stunMsgType(method: Int, cls: Int): Int =
     ((method and 0x0F80) shl 2) or
-            ((cls and 0x0100) shl 1) or
+            (cls and 0x0100) or
             ((method and 0x0070) shl 1) or
             (cls and 0x0010) or
             (method and 0x000F)
@@ -112,7 +114,7 @@ internal class StunMessage(
             if (data.size < 20 + length) return null
             val msgType = readUInt16(data, 0)
             val method = ((msgType and 0x3E00) ushr 2) or ((msgType and 0x00E0) ushr 1) or (msgType and 0x000F)
-            val cls = ((msgType and 0x0100) ushr 1) or (msgType and 0x0010)
+            val cls = (msgType and 0x0100) or (msgType and 0x0010)
             val txId = data.copyOfRange(8, 20)
             val msg = StunMessage(method, cls, txId)
             var pos = 20

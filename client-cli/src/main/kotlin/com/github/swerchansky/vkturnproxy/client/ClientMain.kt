@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -38,6 +39,11 @@ import java.util.logging.Logger
 private val log: Logger = Logger.getLogger("client")
 
 fun main(args: Array<String>) {
+    // Load logging config from classpath
+    val logConfig = object {}.javaClass.classLoader?.getResourceAsStream("logging.properties")
+    if (logConfig != null) {
+        java.util.logging.LogManager.getLogManager().readConfiguration(logConfig)
+    }
     Security.addProvider(BouncyCastleProvider())
     ClientCommand().main(args)
 }
@@ -120,7 +126,7 @@ private class ClientCommand : CliktCommand(name = "client") {
 
 // ── DTLS + TURN connection ─────────────────────────────────────────────────
 
-@Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
+@Suppress("ReturnCount")
 private suspend fun runDtlsTurnConnection(
     link: String,
     provider: CredentialProvider,
@@ -141,63 +147,85 @@ private suspend fun runDtlsTurnConnection(
     val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
     println(turnAddr.address.hostAddress)
 
-    val dtls = DtlsClient(peerAddr)
-    try {
-        dtls.connect()
-        log.info("DTLS handshake complete")
-        onDtlsReady?.complete(Unit)
-    } catch (e: Exception) {
-        log.warning("DTLS connect failed: ${e.message}")
-        dtls.close()
-        return
-    }
-
+    // 1. TURN must be set up first — DTLS handshake travels through the relay
     val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4 else RequestedAddressFamily.IPv6
     val turnClient = try {
         TurnClient.connect(turnAddr, creds, useUdp, addrFamily)
     } catch (e: Exception) {
         log.warning("TURN connect failed: ${e.message}")
-        dtls.close()
         return
     }
 
+    val dtls = DtlsClient()
     try {
         turnClient.allocate()
-        log.info("TURN relay: ${turnClient.relayAddress()}")
+        log.info("Connected! Relay: ${turnClient.relayAddress()}")
         turnClient.channelBind(peerAddr.address.address, peerAddr.port)
+
+        // 2. DTLS handshake over TURN relay (TurnDatagramTransport wraps turnClient)
+        try {
+            val startMs = System.currentTimeMillis()
+            dtls.connectOverTurn(turnClient) { msg -> println(msg) }
+            log.info("DTLS handshake OK after ${System.currentTimeMillis() - startMs}ms")
+        } catch (e: Exception) {
+            log.warning("DTLS handshake failed: ${e.message}")
+            return
+        }
+        onDtlsReady?.complete(Unit)
+        log.info("Relay started — listening on ${localSocket.localSocketAddress}, peer=$peerAddr")
 
         val buf = ByteArray(1600)
         val dtlsBuf = ByteArray(1600)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
+        var toServerPkts = 0
+        var fromServerPkts = 0
 
-        // localSocket → DTLS → TURN
-        val job1 = CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                while (true) {
-                    val pkt = DatagramPacket(buf, buf.size)
-                    localSocket.receive(pkt)
-                    lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
-                    dtls.send(buf.copyOf(pkt.length))
+        // Both relay directions — coroutineScope cancels all children if either exits
+        coroutineScope {
+            // localSocket → DTLS (encrypt) → TURN → server
+            launch(Dispatchers.IO) {
+                try {
+                    while (true) {
+                        val pkt = DatagramPacket(buf, buf.size)
+                        localSocket.receive(pkt)
+                        val from = InetSocketAddress(pkt.address, pkt.port)
+                        lastLocalAddr.set(from)
+                        toServerPkts++
+                        if (toServerPkts <= 5 || toServerPkts % 100 == 0)
+                            log.info("→server pkt #$toServerPkts ${pkt.length}B from $from")
+                        dtls.send(buf.copyOf(pkt.length))
+                    }
+                } catch (e: Exception) {
+                    log.warning("localSocket→DTLS ended after $toServerPkts pkts: ${e.javaClass.name}: ${e.message}")
+                }
+            }
+
+            // server → TURN → DTLS (decrypt) → localSocket
+            launch(Dispatchers.IO) {
+                log.info("←server direction: waiting for first DTLS packet from server...")
+                try {
+                    while (true) {
+                        val n = dtls.receive(dtlsBuf)
+                        if (n < 0) {
+                            log.info("←server: dtls.receive() returned -1 (timeout), exiting relay")
+                            break
+                        }
+                        fromServerPkts++
+                        val addr = lastLocalAddr.get()
+                        if (fromServerPkts <= 5 || fromServerPkts % 100 == 0)
+                            log.info("←server pkt #$fromServerPkts ${n}B → localAddr=${addr}")
+                        if (addr == null) {
+                            log.warning("←server: no local WireGuard addr yet, dropping pkt #$fromServerPkts")
+                            continue
+                        }
+                        localSocket.send(DatagramPacket(dtlsBuf, n, addr))
+                    }
+                } catch (e: Exception) {
+                    log.warning("DTLS→localSocket ended after $fromServerPkts pkts: ${e.javaClass.name}: ${e.message}")
                 }
             }
         }
-
-        // TURN → DTLS → localSocket
-        val job2 = CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                while (true) {
-                    val data = turnClient.receive() ?: continue
-                    dtls.send(data)
-                    val n = dtls.receive(dtlsBuf)
-                    if (n < 0) break
-                    val addr = lastLocalAddr.get() ?: continue
-                    localSocket.send(DatagramPacket(dtlsBuf, n, addr))
-                }
-            }
-        }
-
-        job1.join()
-        job2.cancel()
+        log.info("Relay done: →server=$toServerPkts pkts, ←server=$fromServerPkts pkts")
     } finally {
         dtls.close()
         turnClient.close()
