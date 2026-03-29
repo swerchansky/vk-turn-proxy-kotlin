@@ -33,6 +33,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
+@Suppress("TooManyFunctions")
 class ProxyService : Service() {
 
     companion object {
@@ -67,6 +68,7 @@ class ProxyService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    @Suppress("ReturnCount")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -148,7 +150,7 @@ class ProxyService : Service() {
             .createNotificationChannel(channel)
     }
 
-    @Suppress("TooGenericExceptionCaught", "ReturnCount")
+    @Suppress("TooGenericExceptionCaught", "ReturnCount", "LongMethod", "CyclomaticComplexMethod")
     private suspend fun runProxy(
         rawLink: String,
         peerAddress: String,
@@ -268,6 +270,7 @@ class ProxyService : Service() {
                 }
 
                 // server → TURN → DTLS → WireGuard
+                @Suppress("LoopWithTooManyJumpStatements")
                 launch {
                     appendLog("←server direction: waiting for first DTLS packet from server...")
                     runCatching {

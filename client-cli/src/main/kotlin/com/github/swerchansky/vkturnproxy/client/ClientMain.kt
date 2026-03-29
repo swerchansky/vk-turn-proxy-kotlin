@@ -126,7 +126,7 @@ private class ClientCommand : CliktCommand(name = "client") {
 
 // ── DTLS + TURN connection ─────────────────────────────────────────────────
 
-@Suppress("ReturnCount")
+@Suppress("ReturnCount", "LongMethod")
 private suspend fun runDtlsTurnConnection(
     link: String,
     provider: CredentialProvider,
@@ -140,8 +140,7 @@ private suspend fun runDtlsTurnConnection(
     val creds = try {
         provider.getCredentials(link)
     } catch (e: Exception) {
-        log.severe("Failed to get TURN credentials: ${e::class.qualifiedName}: ${e.message}")
-        e.printStackTrace()
+        log.severe("Failed to get TURN credentials: ${e::class.qualifiedName}: ${e.message}\n${e.stackTraceToString()}")
         return
     }
     val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
@@ -201,6 +200,7 @@ private suspend fun runDtlsTurnConnection(
             }
 
             // server → TURN → DTLS (decrypt) → localSocket
+            @Suppress("LoopWithTooManyJumpStatements")
             launch(Dispatchers.IO) {
                 log.info("←server direction: waiting for first DTLS packet from server...")
                 try {
@@ -264,29 +264,32 @@ private suspend fun runTurnConnectionLoop(
         val buf = ByteArray(1600)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
 
-        val job1 = CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                while (true) {
-                    val pkt = DatagramPacket(buf, buf.size)
-                    localSocket.receive(pkt)
-                    lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
-                    turnClient.send(buf.copyOf(pkt.length))
-                }
+        coroutineScope {
+            // localSocket → TURN
+            launch(Dispatchers.IO) {
+                runCatching {
+                    while (true) {
+                        val pkt = DatagramPacket(buf, buf.size)
+                        localSocket.receive(pkt)
+                        lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
+                        turnClient.send(buf.copyOf(pkt.length))
+                    }
+                }.onFailure { log.warning("localSocket→TURN ended: ${it.message}") }
+                // Close turnClient to unblock the receive loop in the other direction
+                turnClient.close()
+            }
+
+            // TURN → localSocket
+            launch(Dispatchers.IO) {
+                runCatching {
+                    while (true) {
+                        val data = turnClient.receive() ?: continue
+                        val addr = lastLocalAddr.get() ?: continue
+                        localSocket.send(DatagramPacket(data, data.size, addr))
+                    }
+                }.onFailure { log.warning("TURN→localSocket ended: ${it.message}") }
             }
         }
-
-        val job2 = CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                while (true) {
-                    val data = turnClient.receive() ?: continue
-                    val addr = lastLocalAddr.get() ?: continue
-                    localSocket.send(DatagramPacket(data, data.size, addr))
-                }
-            }
-        }
-
-        job1.join()
-        job2.cancel()
     } finally {
         turnClient.close()
     }
