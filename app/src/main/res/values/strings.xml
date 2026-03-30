@@ -1,11 +1,116 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Good TURN</string>
-    <string name="hint_link">Conference link (VK or Yandex)</string>
+    <string name="app_name">vk-turn-proxy</string>
+    <string name="app_subtitle">TURN tunnel for WireGuard</string>
+
+    <!-- Onboarding -->
+    <string name="next">Next</string>
+    <string name="skip">Skip</string>
+    <string name="get_started">Get Started</string>
+    <string name="onboarding_title_1">Welcome!</string>
+    <string name="onboarding_desc_1">vk-turn-proxy allows you to use WireGuard through VK Video Call infrastructure.</string>
+    <string name="onboarding_title_2">How to use</string>
+    <string name="onboarding_desc_2">1. Create a VK Video Call\n2. Copy the join link\n3. Paste it in the app and connect!</string>
+    <string name="onboarding_title_3">Configuration</string>
+    <string name="onboarding_desc_3">Enter your server address and port. You can save your favorite servers for quick access.</string>
+
+    <!-- Connect screen -->
+    <string name="connection_settings">Connection</string>
+    <string name="hint_link">VK conference link</string>
     <string name="hint_peer">Server address (host:port)</string>
     <string name="hint_port">Listen port</string>
-    <string name="hint_connections">Connections N (0 = auto: 16 VK / 1 Yandex)</string>
-    <string name="use_udp">Use UDP for TURN</string>
+    <string name="hint_connections">Connections (0 = auto)</string>
+    <string name="paste_from_clipboard">Paste from clipboard</string>
+    <string name="clipboard_link_detected">VK link detected in clipboard</string>
+    <string name="paste">Paste</string>
+    <string name="save_favorite">Save to Favorites</string>
+    <string name="favorite_name_hint">Favorite name (e.g. Home Server)</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+
+    <!-- FAB -->
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
+
+    <!-- Status card -->
+    <string name="status_idle">Idle</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_error">Error</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="tap_for_details">Tap for details →</string>
+    <string name="session_time">%s</string>
+    <string name="packets_up">↑ %d pkts</string>
+    <string name="packets_down">↓ %d pkts</string>
+    <string name="packets_up_fmt">↑ %s pkts</string>
+    <string name="packets_down_fmt">↓ %s pkts</string>
+    <string name="fill_all_fields">Fill in all required fields</string>
+    <string name="error_required">Required</string>
+
+    <!-- Bottom nav -->
+    <string name="nav_connect">Connect</string>
+    <string name="nav_logs">Logs</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Logs screen -->
+    <string name="logs_title">Logs</string>
+    <string name="share_logs">Share</string>
+    <string name="clear_logs">Clear</string>
+    <string name="copy_all">Copy All</string>
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="search_logs">Search logs…</string>
+    <string name="logs_empty">No logs yet.\nStart a connection to see output here.</string>
+    <string name="jump_to_bottom">Jump to bottom</string>
+    <string name="new_log_lines">%d new lines</string>
+
+    <!-- Connection detail sheet -->
+    <string name="detail_title">Connection Details</string>
+    <string name="detail_relay">Relay address</string>
+    <string name="detail_connected_since">Connected since</string>
+    <string name="detail_packets_sent">Packets sent</string>
+    <string name="detail_packets_received">Packets received</string>
+    <string name="detail_throughput">Throughput</string>
+    <string name="detail_pps">%s pps up / %s pps down</string>
+    <string name="copy_relay_addr">Copy address</string>
+    <string name="copied">Copied to clipboard</string>
+    <string name="graph_legend_up">↑ Upload</string>
+    <string name="graph_legend_down">↓ Download</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_network">Network</string>
+    <string name="settings_listen_port">Listen port</string>
+    <string name="settings_listen_port_desc">Local UDP port for WireGuard (default: 9000)</string>
+    <string name="settings_connections">Parallel connections</string>
+    <string name="settings_connections_desc">0 = auto (16 for VK)</string>
+    <string name="settings_logs_section">Logs</string>
+    <string name="settings_autoscroll">Auto-scroll logs</string>
+    <string name="settings_autoscroll_desc">Automatically scroll to new log entries</string>
+    <string name="settings_save_logs">Save logs to file</string>
+    <string name="settings_save_logs_desc">Write session logs to Downloads folder</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_desc">App color scheme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_notifications">Packet notifications</string>
+    <string name="settings_notifications_desc">Show stats in notification while connected</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_source_code">Source code</string>
+    <string name="settings_source_code_url">github.com/swerchansky/vk-turn-proxy-kotlin</string>
+    <string name="settings_open_source">Open on GitHub</string>
+
+    <!-- Notification -->
+    <string name="notification_stop">Stop</string>
+    <string name="notification_channel_name">Proxy Service</string>
+
+    <!-- Quick Tile -->
+    <string name="tile_label">vk-turn-proxy</string>
+
+    <!-- Share intent -->
+    <string name="share_chooser_title">Share logs via…</string>
+    <string name="share_received_link">VK link received — tap to fill</string>
+    <string name="fill_link">Fill</string>
 </resources>

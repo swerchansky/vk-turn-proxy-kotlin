@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_500">#FF6200EE</color>
+    <color name="primary">#2979FF</color>
+
+    <!-- Connection status indicator dots -->
+    <color name="status_connected">#43A047</color>
+    <color name="status_error">#E53935</color>
+    <color name="status_connecting">#FB8C00</color>
+    <color name="status_idle">#78909C</color>
+
+    <!-- Status card animated backgrounds -->
+    <color name="card_idle">#1A1E2E</color>
+    <color name="card_connecting">#2D1B00</color>
+    <color name="card_connected">#0A2318</color>
+    <color name="card_error">#2D0A0A</color>
+
+    <!-- Log line colors -->
+    <color name="log_success">#66BB6A</color>
+    <color name="log_error">#EF5350</color>
+    <color name="log_info">#42A5F5</color>
+    <color name="log_warning">#FFA726</color>
+    <color name="log_timestamp">#546E7A</color>
+    <color name="log_default">#B0BEC5</color>
 </resources>

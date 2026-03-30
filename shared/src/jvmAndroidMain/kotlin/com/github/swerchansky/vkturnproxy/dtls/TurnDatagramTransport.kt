@@ -21,15 +21,12 @@ internal class TurnDatagramTransport(
 
     override fun send(data: ByteArray, off: Int, len: Int) {
         sentCount++
-        logger("DTLS→TURN send #$sentCount ${len}B  hdr=${data.drop(off).take(3).joinToString("") { "%02x".format(it) }}")
         val payload = if (off == 0 && len == data.size) data else data.copyOfRange(off, off + len)
         turnClient.send(payload)
     }
 
     override fun receive(data: ByteArray, off: Int, len: Int, waitMillis: Int): Int {
         val isPostHandshake = waitMillis > 5_000
-        if (isPostHandshake) logger("DTLS←TURN: post-handshake receive() timeout=${waitMillis}ms")
-        else logger("DTLS←TURN: handshake receive() timeout=${waitMillis}ms")
         val deadline = System.currentTimeMillis() + waitMillis.coerceAtLeast(1)
         while (true) {
             val remaining = (deadline - System.currentTimeMillis()).toInt()
@@ -46,14 +43,11 @@ internal class TurnDatagramTransport(
                     continue
                 }
                 recvCount++
-                logger("DTLS←TURN recv #$recvCount ${payload.size}B  hdr=${payload.take(3).joinToString("") { "%02x".format(it) }}")
                 val copyLen = minOf(len, payload.size)
                 if (payload.size > len) logger("DTLS←TURN WARN: payload ${payload.size}B > buf $len B, truncating!")
                 payload.copyInto(data, off, 0, copyLen)
                 return copyLen
             } catch (_: SocketTimeoutException) {
-                // Socket poll timed out — loop and check overall deadline
-                logger("DTLS←TURN: socket poll timeout (remaining=${(deadline - System.currentTimeMillis()).toInt()}ms), looping")
                 continue
             }
         }

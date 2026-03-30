@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="16dp"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="100dp">
+
+            <!-- Status hero card (animated gradient background) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/statusCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:clickable="true"
+                android:focusable="true"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="160dp"
+                    android:padding="20dp">
+
+                    <!-- Ripple animation overlay (centered, expands on connect) -->
+                    <View
+                        android:id="@+id/rippleView"
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/ic_ripple_circle"
+                        android:visibility="gone"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:gravity="start">
+
+                        <!-- Status row: pulsing dot + text -->
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="12dp">
+
+                            <View
+                                android:id="@+id/statusDot"
+                                android:layout_width="12dp"
+                                android:layout_height="12dp"
+                                android:layout_marginEnd="10dp"
+                                android:background="@drawable/circle_status"/>
+
+                            <TextView
+                                android:id="@+id/tvStatusLabel"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/status_idle"
+                                android:textColor="#FFFFFFFF"
+                                android:textSize="18sp"
+                                android:textStyle="bold"/>
+
+                        </LinearLayout>
+
+                        <!-- Session timer (hidden unless connected) -->
+                        <TextView
+                            android:id="@+id/tvTimer"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:fontFamily="monospace"
+                            android:textColor="#CCFFFFFF"
+                            android:textSize="28sp"
+                            android:textStyle="bold"
+                            android:visibility="gone"/>
+
+                        <!-- Packet stats row (hidden unless connected) -->
+                        <LinearLayout
+                            android:id="@+id/statsRow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="8dp"
+                            android:visibility="gone">
+
+                            <TextView
+                                android:id="@+id/tvPktsUp"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="20dp"
+                                android:textColor="#CCFFFFFF"
+                                android:textSize="13sp"
+                                android:fontFamily="monospace"/>
+
+                            <TextView
+                                android:id="@+id/tvPktsDown"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textColor="#CCFFFFFF"
+                                android:textSize="13sp"
+                                android:fontFamily="monospace"/>
+
+                        </LinearLayout>
+
+                        <!-- Network Graph -->
+                        <com.github.swerchansky.vkturnproxy.ui.views.NetworkGraphView
+                            android:id="@+id/networkGraph"
+                            android:layout_width="match_parent"
+                            android:layout_height="60dp"
+                            android:layout_marginBottom="8dp"
+                            android:visibility="gone"/>
+
+                        <!-- Connecting step text -->
+                        <TextView
+                            android:id="@+id/tvConnectingStep"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="#BBFFFFFF"
+                            android:textSize="13sp"
+                            android:visibility="gone"/>
+
+                        <!-- Traffic activity indicator (wave when packets flowing) -->
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/activityIndicator"
+                            android:layout_width="160dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:indeterminate="true"
+                            android:visibility="gone"
+                            app:indicatorColor="#88FFFFFF"
+                            app:trackColor="#33FFFFFF"
+                            app:trackCornerRadius="2dp"
+                            app:trackThickness="3dp"/>
+
+                        <!-- Tap for details hint (shown when connected) -->
+                        <TextView
+                            android:id="@+id/tvTapDetails"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/tap_for_details"
+                            android:textColor="#88FFFFFF"
+                            android:textSize="12sp"
+                            android:visibility="gone"/>
+
+                    </LinearLayout>
+
+                </FrameLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Connecting progress indicator -->
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progressBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:trackCornerRadius="4dp"/>
+
+            <!-- Connection settings card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:letterSpacing="0.08"
+                        android:text="@string/connection_settings"
+                        android:textAllCaps="true"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:textSize="11sp"/>
+
+                    <!-- Link field with paste end icon -->
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilLink"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:hint="@string/hint_link"
+                        app:endIconMode="custom"
+                        app:endIconDrawable="@drawable/ic_paste"
+                        app:endIconContentDescription="@string/paste_from_clipboard">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etLink"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:imeOptions="actionNext"
+                            android:inputType="textUri"
+                            android:singleLine="true"/>
+
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <!-- Server address field with history dropdown -->
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilPeer"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/hint_peer"
+                        app:endIconMode="custom"
+                        app:endIconDrawable="@drawable/ic_star"
+                        app:endIconContentDescription="@string/save_favorite">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/etPeer"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:completionThreshold="0"
+                            android:imeOptions="actionDone"
+                            android:inputType="textUri"
+                            android:singleLine="true"/>
+
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- ExtendedFAB: Connect / Disconnect -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabConnect"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="20dp"
+        android:text="@string/connect"
+        app:icon="@drawable/ic_connect_fab"/>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

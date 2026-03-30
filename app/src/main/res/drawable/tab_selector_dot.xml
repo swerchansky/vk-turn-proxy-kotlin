@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <layer-list>
+            <item android:width="8dp" android:height="8dp" android:gravity="center">
+                <shape android:shape="oval">
+                    <solid android:color="?attr/colorPrimary"/>
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item>
+        <layer-list>
+            <item android:width="8dp" android:height="8dp" android:gravity="center">
+                <shape android:shape="oval">
+                    <solid android:color="?attr/colorOutlineVariant"/>
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+</selector>

@@ -93,7 +93,6 @@ class DtlsServer(
 
             override fun send(data: ByteArray, off: Int, len: Int) {
                 sendCount++
-                log.fine("DTLS-server→client send #$sendCount ${len}B to $clientAddr  hdr=${data.drop(off).take(3).joinToString("") { "%02x".format(it) }}")
                 socket.send(DatagramPacket(data, off, len, clientAddr))
             }
 

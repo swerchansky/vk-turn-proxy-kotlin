@@ -10,13 +10,13 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.github.swerchansky.vkturnproxy.App
+import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.credentials.CredentialProvider
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.credentials.YandexCredentialProvider
 import com.github.swerchansky.vkturnproxy.dtls.DtlsClient
 import com.github.swerchansky.vkturnproxy.turn.RequestedAddressFamily
 import com.github.swerchansky.vkturnproxy.turn.TurnClient
-import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.ui.main.MainActivity
 import com.github.swerchansky.vkturnproxy.ui.main.ProxyState
 import kotlinx.coroutines.CompletableDeferred
@@ -32,8 +32,21 @@ import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
+
+data class ProxyStats(
+    val toServerPkts: Long = 0,
+    val fromServerPkts: Long = 0,
+    val connectedSince: Long = 0,
+    val toServerPps: Float = 0f,
+    val fromServerPps: Float = 0f,
+    val relayAddr: String = "",
+)
 
 @Suppress("TooManyFunctions")
 class ProxyService : Service() {
@@ -41,6 +54,7 @@ class ProxyService : Service() {
     companion object {
         val state = MutableStateFlow<ProxyState>(ProxyState.Idle)
         val log = MutableStateFlow("")
+        val stats = MutableStateFlow(ProxyStats())
 
         const val ACTION_START = "com.github.swerchansky.vkturnproxy.START"
         const val ACTION_STOP = "com.github.swerchansky.vkturnproxy.STOP"
@@ -48,12 +62,19 @@ class ProxyService : Service() {
         const val EXTRA_LINK = "link"
         const val EXTRA_PEER = "peer"
         const val EXTRA_PORT = "port"
-        const val EXTRA_UDP = "udp"
         const val EXTRA_IS_VK = "is_vk"
         const val EXTRA_N = "n_connections"
 
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "proxy_channel"
+
+        fun formatPackets(count: Long): String {
+            return when {
+                count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f)
+                count >= 1_000 -> String.format("%.1fK", count / 1_000f)
+                else -> count.toString()
+            }
+        }
     }
 
     @Inject lateinit var vkProvider: VkCredentialProvider
@@ -62,6 +83,9 @@ class ProxyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var proxyJob: Job? = null
     private var localSocket: DatagramSocket? = null
+
+    private val toServerCounter = AtomicLong(0)
+    private val fromServerCounter = AtomicLong(0)
 
     override fun onCreate() {
         super.onCreate()
@@ -78,12 +102,14 @@ class ProxyService : Service() {
                 val link = intent.getStringExtra(EXTRA_LINK) ?: return START_NOT_STICKY
                 val peer = intent.getStringExtra(EXTRA_PEER) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 9000)
-                val udp = intent.getBooleanExtra(EXTRA_UDP, false)
                 val isVk = intent.getBooleanExtra(EXTRA_IS_VK, true)
                 val n = intent.getIntExtra(EXTRA_N, 0)
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
                 proxyJob?.cancel()
-                proxyJob = scope.launch { runProxy(link, peer, port, udp, isVk, n) }
+                toServerCounter.set(0)
+                fromServerCounter.set(0)
+                stats.value = ProxyStats()
+                proxyJob = scope.launch { runProxy(link, peer, port, isVk, n) }
             }
             ACTION_STOP -> stopProxy()
         }
@@ -95,6 +121,7 @@ class ProxyService : Service() {
         proxyJob?.cancel()
         localSocket?.close()
         state.value = ProxyState.Idle
+        stats.value = ProxyStats()
         scope.cancel()
     }
 
@@ -105,13 +132,16 @@ class ProxyService : Service() {
         localSocket = null
         appendLog("--- Disconnected ---")
         state.value = ProxyState.Idle
+        stats.value = ProxyStats()
         @Suppress("DEPRECATION")
         stopForeground(true)
         stopSelf()
     }
 
     private fun appendLog(line: String) {
-        log.value = if (log.value.isEmpty()) line else "${log.value}\n$line"
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val entry = "[$time] $line"
+        log.value = if (log.value.isEmpty()) entry else "${log.value}\n$entry"
     }
 
     private fun updateNotification(text: String) {
@@ -134,7 +164,7 @@ class ProxyService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Good TURN")
+            .setContentTitle("vk-turn-proxy")
             .setContentText(text)
             .setContentIntent(openIntent)
             .addAction(android.R.drawable.ic_delete, "Stop", stopIntent)
@@ -149,7 +179,7 @@ class ProxyService : Service() {
             CHANNEL_ID,
             "Proxy Service",
             NotificationManager.IMPORTANCE_LOW,
-        ).apply { description = "VK/Yandex TURN proxy tunnel" }
+        ).apply { description = "VK TURN proxy tunnel" }
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .createNotificationChannel(channel)
     }
@@ -159,13 +189,12 @@ class ProxyService : Service() {
         rawLink: String,
         peerAddress: String,
         listenPort: Int,
-        useUdp: Boolean,
         isVk: Boolean,
         nConnections: Int,
     ) {
         val provider: CredentialProvider = if (isVk) vkProvider else yandexProvider
         val peerAddr = parseAddr(peerAddress)
-        val n = if (nConnections > 0) nConnections else if (isVk) 16 else 1
+        val n = if (nConnections > 0) nConnections else 16
         val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4
         else RequestedAddressFamily.IPv6
 
@@ -182,21 +211,49 @@ class ProxyService : Service() {
                 launch {
                     runSingleDtlsConnection(
                         rawLink, provider, peerAddr, socket,
-                        useUdp, addrFamily, firstReady, ::appendLog,
+                        addrFamily, firstReady, ::appendLog,
+                        onToServer = { toServerCounter.incrementAndGet() },
+                        onFromServer = { fromServerCounter.incrementAndGet() },
                     )
                 }
 
                 val relayAddr = firstReady.await()
+                val connectedAt = System.currentTimeMillis()
                 appendLog("Connected! Relay: $relayAddr\nListening on 127.0.0.1:$listenPort")
                 state.value = ProxyState.Connected(relayAddr)
+                stats.value = ProxyStats(connectedSince = connectedAt, relayAddr = relayAddr)
                 updateNotification("Connected ×$n — $relayAddr")
+
+                // Stats updater: refresh every second
+                launch {
+                    var prevTo = 0L
+                    var prevFrom = 0L
+                    while (true) {
+                        delay(1000)
+                        val to = toServerCounter.get()
+                        val from = fromServerCounter.get()
+                        stats.value = stats.value.copy(
+                            toServerPkts = to,
+                            fromServerPkts = from,
+                            toServerPps = (to - prevTo).toFloat(),
+                            fromServerPps = (from - prevFrom).toFloat(),
+                        )
+                        prevTo = to
+                        prevFrom = from
+                        val toFmt = formatPackets(to)
+                        val fromFmt = formatPackets(from)
+                        updateNotification("↑$toFmt ↓$fromFmt pkts — $relayAddr")
+                    }
+                }
 
                 repeat(n - 1) { idx ->
                     delay(200L * (idx + 1))
                     launch {
                         runSingleDtlsConnection(
                             rawLink, provider, peerAddr, socket,
-                            useUdp, addrFamily, null, ::appendLog,
+                            addrFamily, null, ::appendLog,
+                            onToServer = { toServerCounter.incrementAndGet() },
+                            onFromServer = { fromServerCounter.incrementAndGet() },
                         )
                     }
                 }
@@ -230,10 +287,11 @@ private suspend fun runSingleDtlsConnection(
     provider: CredentialProvider,
     peerAddr: InetSocketAddress,
     socket: DatagramSocket,
-    useUdp: Boolean,
     addrFamily: RequestedAddressFamily,
     firstReady: CompletableDeferred<String>?,
     logger: (String) -> Unit,
+    onToServer: () -> Unit = {},
+    onFromServer: () -> Unit = {},
 ) {
     val isFirst = firstReady != null
     val silentLogger: (String) -> Unit = { _ -> }
@@ -255,7 +313,7 @@ private suspend fun runSingleDtlsConnection(
 
     val turnClient = try {
         if (isFirst) logger("TURN connect to $turnAddr...")
-        TurnClient.connect(turnAddr, creds, useUdp, addrFamily, logger = if (isFirst) logger else silentLogger)
+        TurnClient.connect(turnAddr, creds, true, addrFamily, logger = if (isFirst) logger else silentLogger)
     } catch (e: Exception) {
         logger("TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
         firstReady?.completeExceptionally(e)
@@ -304,6 +362,7 @@ private suspend fun runSingleDtlsConnection(
                         val from = InetSocketAddress(pkt.address, pkt.port)
                         lastLocalAddr.set(from)
                         toServerPkts++
+                        onToServer()
                         dtls.send(buf.copyOf(pkt.length))
                     }
                 }.onFailure {
@@ -317,8 +376,9 @@ private suspend fun runSingleDtlsConnection(
                     while (true) {
                         val n = dtls.receive(dtlsBuf)
                         if (n < 0) break
-                        if (n == 1 && dtlsBuf[0] == 0.toByte()) continue // keepalive
+                        if (n == 1 && dtlsBuf[0] == 0.toByte()) continue
                         fromServerPkts++
+                        onFromServer()
                         val addr = lastLocalAddr.get() ?: continue
                         socket.send(DatagramPacket(dtlsBuf, n, addr))
                     }

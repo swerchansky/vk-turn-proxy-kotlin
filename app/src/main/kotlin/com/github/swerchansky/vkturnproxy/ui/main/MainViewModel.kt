@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import com.github.swerchansky.vkturnproxy.service.ProxyService
+import com.github.swerchansky.vkturnproxy.service.ProxyStats
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 
@@ -20,22 +21,15 @@ class MainViewModel @Inject constructor(
 
     val state: StateFlow<ProxyState> = ProxyService.state
     val log: StateFlow<String> = ProxyService.log
+    val stats: StateFlow<ProxyStats> = ProxyService.stats
 
-    fun connect(
-        rawLink: String,
-        peerAddress: String,
-        listenPort: Int,
-        useUdp: Boolean,
-        isVk: Boolean,
-        nConnections: Int,
-    ) {
+    fun connect(rawLink: String, peerAddress: String, listenPort: Int, nConnections: Int) {
         val intent = Intent(app, ProxyService::class.java).apply {
             action = ProxyService.ACTION_START
             putExtra(ProxyService.EXTRA_LINK, rawLink)
             putExtra(ProxyService.EXTRA_PEER, peerAddress)
             putExtra(ProxyService.EXTRA_PORT, listenPort)
-            putExtra(ProxyService.EXTRA_UDP, useUdp)
-            putExtra(ProxyService.EXTRA_IS_VK, isVk)
+            putExtra(ProxyService.EXTRA_IS_VK, true)
             putExtra(ProxyService.EXTRA_N, nConnections)
         }
         app.startForegroundService(intent)
