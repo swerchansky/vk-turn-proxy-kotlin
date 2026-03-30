@@ -1,0 +1,22 @@
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    threshold: 80
+  LongParameterList:
+    functionThreshold: 9
+  CyclomaticComplexMethod:
+    threshold: 20
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    maxLineLength: 140
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+
+naming:
+  active: false

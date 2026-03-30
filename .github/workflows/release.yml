@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os-name }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux x86_64 ──────────────────────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: amd64
+            binary-suffix: ''
+
+          # ── Linux arm64 ───────────────────────────────────────────────────
+          - runner: ubuntu-22.04-arm
+            os-name: linux
+            arch: arm64
+            binary-suffix: ''
+
+          # ── Linux x86 (i386) — via QEMU ───────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: 386
+            binary-suffix: ''
+            qemu: 'i386'
+            graalvm-arch: 'linux-x86'
+
+          # ── Linux armv7 — via QEMU ────────────────────────────────────────
+          - runner: ubuntu-latest
+            os-name: linux
+            arch: armv7
+            binary-suffix: ''
+            qemu: 'arm'
+            graalvm-arch: 'linux-armv7'
+
+          # ── macOS arm64 (Apple Silicon) ───────────────────────────────────
+          - runner: macos-latest
+            os-name: darwin
+            arch: arm64
+            binary-suffix: ''
+
+          # ── Windows x86_64 ────────────────────────────────────────────────
+          - runner: windows-latest
+            os-name: windows
+            arch: amd64
+            binary-suffix: '.exe'
+
+          # ── Windows x86 ───────────────────────────────────────────────────
+          - runner: windows-latest
+            os-name: windows
+            arch: 386
+            binary-suffix: '.exe'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-arch builds)
+        if: matrix.qemu != ''
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.qemu }}
+
+      - name: Set up GraalVM 21
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Build native binaries
+        shell: bash
+        run: |
+          ./gradlew :server:nativeCompile :client-cli:nativeCompile --no-daemon
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          OS="${{ matrix.os-name }}"
+          ARCH="${{ matrix.arch }}"
+          EXT="${{ matrix.binary-suffix }}"
+
+          # Paths differ on Windows (.exe extension already set by Gradle)
+          cp server/build/native/nativeCompile/server${EXT}     dist/server-${OS}-${ARCH}${EXT}
+          cp client-cli/build/native/nativeCompile/client${EXT} dist/client-${OS}-${ARCH}${EXT}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: good-turn-${{ matrix.os-name }}-${{ matrix.arch }}
+          path: dist/**
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
