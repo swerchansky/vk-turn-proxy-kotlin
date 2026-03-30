@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+@Suppress("TooManyFunctions")
 class ConnectFragment : BaseFragment() {
 
     companion object {

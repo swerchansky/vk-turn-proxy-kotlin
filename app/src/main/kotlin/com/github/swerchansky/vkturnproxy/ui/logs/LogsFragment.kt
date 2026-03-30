@@ -28,6 +28,7 @@ import com.github.swerchansky.vkturnproxy.ui.main.MainViewModel
 import com.github.swerchansky.vkturnproxy.ui.main.ProxyState
 import kotlinx.coroutines.launch
 
+@Suppress("TooManyFunctions")
 class LogsFragment : BaseFragment() {
 
     companion object {

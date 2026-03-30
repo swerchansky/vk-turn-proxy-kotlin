@@ -76,6 +76,7 @@ class ConnectionDetailSheet : BottomSheetDialogFragment() {
         }
     }
 
+    @Suppress("ImplicitDefaultLocale")
     private fun observeStats() {
         viewLifecycleOwner.lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {

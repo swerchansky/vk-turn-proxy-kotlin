@@ -30,6 +30,7 @@ import com.github.terrakok.cicerone.androidx.FragmentScreen
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@Suppress("TooManyFunctions")
 class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var navigatorHolder: NavigatorHolder
@@ -105,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         handleDeepLink(intent)
     }
 
+    @Suppress("ReturnCount")
     private fun handleDeepLink(intent: Intent?) {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return

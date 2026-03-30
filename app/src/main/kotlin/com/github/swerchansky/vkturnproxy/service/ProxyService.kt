@@ -68,6 +68,7 @@ class ProxyService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "proxy_channel"
 
+        @Suppress("ImplicitDefaultLocale")
         fun formatPackets(count: Long): String {
             return when {
                 count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f)
@@ -281,7 +282,13 @@ class ProxyService : Service() {
 
 // ── Single DTLS + TURN connection ──────────────────────────────────────────
 
-@Suppress("TooGenericExceptionCaught", "ReturnCount", "LongMethod", "CyclomaticComplexMethod")
+@Suppress(
+    "TooGenericExceptionCaught",
+    "ReturnCount",
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    "LongParameterList"
+)
 private suspend fun runSingleDtlsConnection(
     rawLink: String,
     provider: CredentialProvider,
