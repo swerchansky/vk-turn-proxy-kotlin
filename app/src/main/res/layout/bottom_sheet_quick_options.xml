@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="@string/quick_options_title"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"/>
+
+    <!-- Number of connections slider -->
+    <TextView
+        android:id="@+id/tvConnectionsLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:textSize="14sp"
+        android:textColor="?attr/colorOnSurfaceVariant"/>
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/sliderConnections"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:valueFrom="1"
+        android:valueTo="32"
+        android:stepSize="1"
+        android:value="16"
+        app:labelBehavior="floating"/>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnApplyQuickOptions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/save"
+        app:cornerRadius="12dp"/>
+
+</LinearLayout>

@@ -1,24 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#2979FF</color>
+    <color name="ic_launcher_background">#0D1117</color>
 
-    <!-- Connection status indicator dots -->
-    <color name="status_connected">#43A047</color>
-    <color name="status_error">#E53935</color>
-    <color name="status_connecting">#FB8C00</color>
-    <color name="status_idle">#78909C</color>
+    <!-- ── Material3 color roles — LIGHT ────────────────────────────────── -->
+    <color name="md_primary">#2979FF</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#D6E3FF</color>
+    <color name="md_on_primary_container">#001947</color>
 
-    <!-- Status card animated backgrounds -->
+    <color name="md_secondary">#525F7A</color>
+    <color name="md_on_secondary">#FFFFFF</color>
+    <color name="md_secondary_container">#D6E3FF</color>
+    <color name="md_on_secondary_container">#0E1B31</color>
+
+    <color name="md_surface">#F8F9FF</color>
+    <color name="md_on_surface">#181C24</color>
+    <color name="md_surface_variant">#DEE3F0</color>
+    <color name="md_on_surface_variant">#42474E</color>
+
+    <color name="md_background">#F0F2FF</color>
+    <color name="md_on_background">#181C24</color>
+
+    <color name="md_outline">#727990</color>
+    <color name="md_outline_variant">#C2C7D4</color>
+
+    <color name="md_error">#BA1A1A</color>
+    <color name="md_on_error">#FFFFFF</color>
+    <color name="md_error_container">#FFDAD6</color>
+    <color name="md_on_error_container">#410002</color>
+
+    <!-- ── Semantic alias kept for code ─────────────────────────────────── -->
+    <color name="primary">@color/md_primary</color>
+
+    <!-- ── Connection status dots ────────────────────────────────────────── -->
+    <color name="status_connected">#2E7D32</color>
+    <color name="status_error">#C62828</color>
+    <color name="status_connecting">#E65100</color>
+    <color name="status_idle">#546E7A</color>
+
+    <!-- ── Status card backgrounds (always dark — intentional design) ──── -->
     <color name="card_idle">#1A1E2E</color>
     <color name="card_connecting">#2D1B00</color>
     <color name="card_connected">#0A2318</color>
     <color name="card_error">#2D0A0A</color>
 
-    <!-- Log line colors -->
-    <color name="log_success">#66BB6A</color>
-    <color name="log_error">#EF5350</color>
-    <color name="log_info">#42A5F5</color>
-    <color name="log_warning">#FFA726</color>
-    <color name="log_timestamp">#546E7A</color>
-    <color name="log_default">#B0BEC5</color>
+    <!-- ── Log line colors ────────────────────────────────────────────────── -->
+    <color name="log_success">#43A047</color>
+    <color name="log_error">#E53935</color>
+    <color name="log_info">#1E88E5</color>
+    <color name="log_warning">#FB8C00</color>
+    <color name="log_timestamp">#607D8B</color>
+    <color name="log_default">#78909C</color>
 </resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,16 L26,28 L26,52 C26,68.5 38.5,82 54,88 C69.5,82 82,68.5 82,52 L82,28 Z" />
+
+    <!-- Arrow (tunnel) inside shield - pointing up-right, dark color -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M46,62 L46,50 L40,50 L54,36 L68,50 L62,50 L62,62 Z" />
+
+</vector>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── Material3 color roles — DARK ─────────────────────────────────── -->
+    <color name="md_primary">#ADC6FF</color>
+    <color name="md_on_primary">#002E6C</color>
+    <color name="md_primary_container">#0047A1</color>
+    <color name="md_on_primary_container">#D6E3FF</color>
+
+    <color name="md_secondary">#B8C4E3</color>
+    <color name="md_on_secondary">#222E49</color>
+    <color name="md_secondary_container">#394560</color>
+    <color name="md_on_secondary_container">#D6E3FF</color>
+
+    <color name="md_surface">#111318</color>
+    <color name="md_on_surface">#E2E2E9</color>
+    <color name="md_surface_variant">#43474E</color>
+    <color name="md_on_surface_variant">#C3C7CF</color>
+
+    <color name="md_background">#0D0F14</color>
+    <color name="md_on_background">#E2E2E9</color>
+
+    <color name="md_outline">#8D9199</color>
+    <color name="md_outline_variant">#43474E</color>
+
+    <color name="md_error">#FFB4AB</color>
+    <color name="md_on_error">#690005</color>
+    <color name="md_error_container">#93000A</color>
+    <color name="md_on_error_container">#FFDAD6</color>
+
+    <!-- ── Connection status dots — brighter for dark bg ────────────────── -->
+    <color name="status_connected">#43A047</color>
+    <color name="status_error">#E53935</color>
+    <color name="status_connecting">#FB8C00</color>
+    <color name="status_idle">#78909C</color>
+
+    <!-- ── Log line colors — same as light, they're always on dark bg ───── -->
+    <color name="log_success">#66BB6A</color>
+    <color name="log_error">#EF5350</color>
+    <color name="log_info">#42A5F5</color>
+    <color name="log_warning">#FFA726</color>
+    <color name="log_timestamp">#546E7A</color>
+    <color name="log_default">#B0BEC5</color>
+</resources>

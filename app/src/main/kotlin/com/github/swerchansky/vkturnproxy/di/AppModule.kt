@@ -1,6 +1,8 @@
 package com.github.swerchansky.vkturnproxy.di
 
 import android.app.Application
+import android.content.Context
+import com.github.swerchansky.vkturnproxy.data.preferences.AppPreferences
 import com.github.terrakok.cicerone.Cicerone
 import com.github.terrakok.cicerone.NavigatorHolder
 import com.github.terrakok.cicerone.Router
@@ -22,4 +24,10 @@ class AppModule(private val app: Application) {
 
     @Provides @Singleton
     fun provideNavigatorHolder(cicerone: Cicerone<Router>): NavigatorHolder = cicerone.getNavigatorHolder()
+
+    @Provides @Singleton
+    fun provideContext(): Context = app.applicationContext
+
+    @Provides @Singleton
+    fun provideAppPreferences(): AppPreferences = AppPreferences(app)
 }

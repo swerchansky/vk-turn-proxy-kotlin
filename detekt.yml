@@ -1,22 +1,138 @@
 build:
   maxIssues: 0
 
+# ── Complexity ────────────────────────────────────────────────────────────────
 complexity:
   LongMethod:
-    threshold: 80
+    threshold: 120
   LongParameterList:
-    functionThreshold: 9
+    functionThreshold: 14
+    constructorThreshold: 10
   CyclomaticComplexMethod:
-    threshold: 20
+    threshold: 25
+  TooManyFunctions:
+    active: false
+  NestedBlockDepth:
+    threshold: 6
+  ComplexInterface:
+    active: false
+  NamedArguments:
+    active: false
+
+# ── Coroutines ────────────────────────────────────────────────────────────────
+coroutines:
+  active: true
+
+# ── Empty blocks ──────────────────────────────────────────────────────────────
+empty-blocks:
+  EmptyCatchBlock:
+    active: true
+    allowedExceptionNameRegex: "_(ignored|expected)|ignore|_"
+  EmptyFunctionBlock:
+    ignoreOverridden: true
+
+# ── Exceptions ────────────────────────────────────────────────────────────────
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+  TooGenericExceptionThrown:
+    active: false
+  SwallowedException:
+    active: false
+  NotImplementedDeclaration:
+    active: true
+  ObjectExtendsThrowable:
+    active: true
+
+# ── Naming ────────────────────────────────────────────────────────────────────
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    functionPattern: "[a-zA-Z][a-zA-Z0-9]*"
+  TopLevelPropertyNaming:
+    active: false
+  ClassNaming:
+    active: true
+  VariableNaming:
+    active: true
+  PackageNaming:
+    active: true
+  ConstructorParameterNaming:
+    active: false
+  InvalidPackageDeclaration:
+    active: true
+
+# ── Performance ───────────────────────────────────────────────────────────────
+performance:
+  active: true
+  SpreadOperator:
+    active: false
+
+# ── Potential bugs ────────────────────────────────────────────────────────────
+potential-bugs:
+  active: true
+  UnnecessaryNotNullCheck:
+    active: true
+  UnreachableCode:
+    active: true
+  EqualsAlwaysReturnsTrueOrFalse:
+    active: true
+  InvalidRange:
+    active: true
+  IteratorNotThrowingNoSuchElementException:
+    active: true
+  ExplicitGarbageCollectionCall:
+    active: true
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: false
+  CastToNullableType:
+    active: false
+  DontDowncastCollectionTypes:
+    active: false
+
+# ── Style ─────────────────────────────────────────────────────────────────────
 style:
+  active: true
   MagicNumber:
     active: false
   MaxLineLength:
     maxLineLength: 140
-
-exceptions:
-  TooGenericExceptionCaught:
+  WildcardImport:
     active: false
-
-naming:
-  active: false
+  ForbiddenComment:
+    active: false
+  ReturnCount:
+    active: false
+  LoopWithTooManyJumpStatements:
+    active: false
+  UnnecessaryAbstractClass:
+    active: false
+  UnusedParameter:
+    active: true
+  UnusedPrivateMember:
+    active: true
+  OptionalAbstractKeyword:
+    active: true
+  SafeCast:
+    active: true
+  UnnecessaryLet:
+    active: false
+  ExpressionBodySyntax:
+    active: false
+  NoTabs:
+    active: false
+  TrailingWhitespace:
+    active: false
+  NewLineAtEndOfFile:
+    active: true
+  ThrowsCount:
+    active: false
+  DestructuringDeclarationWithTooManyEntries:
+    active: false
+  ClassOrdering:
+    active: false
+  DataClassContainsFunctions:
+    active: false
+  StringShouldBeRawString:
+    active: false

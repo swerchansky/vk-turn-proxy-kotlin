@@ -17,7 +17,7 @@
             android:paddingHorizontal="16dp"
             android:paddingBottom="100dp">
 
-            <!-- Status hero card (animated gradient background) -->
+            <!-- Status hero card — explicitly dark from the start, always -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/statusCard"
                 android:layout_width="match_parent"
@@ -25,152 +25,341 @@
                 android:layout_marginBottom="12dp"
                 android:clickable="true"
                 android:focusable="true"
+                app:cardBackgroundColor="@color/card_idle"
                 app:cardCornerRadius="20dp"
                 app:cardElevation="4dp">
 
-                <FrameLayout
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:minHeight="160dp"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
                     android:padding="20dp">
 
-                    <!-- Ripple animation overlay (centered, expands on connect) -->
-                    <View
-                        android:id="@+id/rippleView"
-                        android:layout_width="80dp"
-                        android:layout_height="80dp"
-                        android:layout_gravity="center"
-                        android:background="@drawable/ic_ripple_circle"
+                    <!-- Animated circle logo with pulsing rings -->
+                    <FrameLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:gravity="center">
+
+                        <!-- Ring 3 (outermost) -->
+                        <View
+                            android:id="@+id/statusRing3"
+                            android:layout_width="180dp"
+                            android:layout_height="180dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/bg_status_ring"
+                            android:alpha="0" />
+
+                        <!-- Ring 2 -->
+                        <View
+                            android:id="@+id/statusRing2"
+                            android:layout_width="150dp"
+                            android:layout_height="150dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/bg_status_ring"
+                            android:alpha="0" />
+
+                        <!-- Ring 1 -->
+                        <View
+                            android:id="@+id/statusRing1"
+                            android:layout_width="120dp"
+                            android:layout_height="120dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/bg_status_ring"
+                            android:alpha="0" />
+
+                        <!-- Main circle with shield -->
+                        <FrameLayout
+                            android:id="@+id/statusCircle"
+                            android:layout_width="96dp"
+                            android:layout_height="96dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/bg_status_circle">
+
+                            <ImageView
+                                android:layout_width="52dp"
+                                android:layout_height="52dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/ic_shield_large"
+                                android:importantForAccessibility="no" />
+
+                        </FrameLayout>
+
+                    </FrameLayout>
+
+                    <!-- Status label -->
+                    <TextView
+                        android:id="@+id/tvStatusLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="4dp"
+                        android:text="@string/status_idle"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="20sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.05"/>
+
+                    <!-- Session timer (monospace digital clock style) -->
+                    <TextView
+                        android:id="@+id/tvTimer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="8dp"
+                        android:fontFamily="monospace"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="36sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1"
                         android:visibility="gone"/>
 
+                    <!-- Packet stats row -->
                     <LinearLayout
-                        android:layout_width="match_parent"
+                        android:id="@+id/statsRow"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:gravity="start">
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp"
+                        android:visibility="gone">
 
-                        <!-- Status row: pulsing dot + text -->
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical"
-                            android:layout_marginBottom="12dp">
-
-                            <View
-                                android:id="@+id/statusDot"
-                                android:layout_width="12dp"
-                                android:layout_height="12dp"
-                                android:layout_marginEnd="10dp"
-                                android:background="@drawable/circle_status"/>
-
-                            <TextView
-                                android:id="@+id/tvStatusLabel"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/status_idle"
-                                android:textColor="#FFFFFFFF"
-                                android:textSize="18sp"
-                                android:textStyle="bold"/>
-
-                        </LinearLayout>
-
-                        <!-- Session timer (hidden unless connected) -->
                         <TextView
-                            android:id="@+id/tvTimer"
+                            android:id="@+id/tvPktsUp"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:fontFamily="monospace"
+                            android:layout_marginEnd="20dp"
                             android:textColor="#CCFFFFFF"
-                            android:textSize="28sp"
-                            android:textStyle="bold"
-                            android:visibility="gone"/>
-
-                        <!-- Packet stats row (hidden unless connected) -->
-                        <LinearLayout
-                            android:id="@+id/statsRow"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:layout_marginBottom="8dp"
-                            android:visibility="gone">
-
-                            <TextView
-                                android:id="@+id/tvPktsUp"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginEnd="20dp"
-                                android:textColor="#CCFFFFFF"
-                                android:textSize="13sp"
-                                android:fontFamily="monospace"/>
-
-                            <TextView
-                                android:id="@+id/tvPktsDown"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:textColor="#CCFFFFFF"
-                                android:textSize="13sp"
-                                android:fontFamily="monospace"/>
-
-                        </LinearLayout>
-
-                        <!-- Network Graph -->
-                        <com.github.swerchansky.vkturnproxy.ui.views.NetworkGraphView
-                            android:id="@+id/networkGraph"
-                            android:layout_width="match_parent"
-                            android:layout_height="60dp"
-                            android:layout_marginBottom="8dp"
-                            android:visibility="gone"/>
-
-                        <!-- Connecting step text -->
-                        <TextView
-                            android:id="@+id/tvConnectingStep"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="#BBFFFFFF"
                             android:textSize="13sp"
-                            android:visibility="gone"/>
+                            android:fontFamily="monospace"/>
 
-                        <!-- Traffic activity indicator (wave when packets flowing) -->
-                        <com.google.android.material.progressindicator.LinearProgressIndicator
-                            android:id="@+id/activityIndicator"
-                            android:layout_width="160dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:indeterminate="true"
-                            android:visibility="gone"
-                            app:indicatorColor="#88FFFFFF"
-                            app:trackColor="#33FFFFFF"
-                            app:trackCornerRadius="2dp"
-                            app:trackThickness="3dp"/>
-
-                        <!-- Tap for details hint (shown when connected) -->
                         <TextView
-                            android:id="@+id/tvTapDetails"
+                            android:id="@+id/tvPktsDown"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/tap_for_details"
-                            android:textColor="#88FFFFFF"
-                            android:textSize="12sp"
-                            android:visibility="gone"/>
+                            android:textColor="#CCFFFFFF"
+                            android:textSize="13sp"
+                            android:fontFamily="monospace"/>
 
                     </LinearLayout>
 
-                </FrameLayout>
+                    <!-- Network Graph -->
+                    <com.github.swerchansky.vkturnproxy.ui.views.NetworkGraphView
+                        android:id="@+id/networkGraph"
+                        android:layout_width="match_parent"
+                        android:layout_height="80dp"
+                        android:layout_marginBottom="8dp"
+                        android:visibility="gone"/>
+
+                    <!-- Activity indicator -->
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/activityIndicator"
+                        android:layout_width="160dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:indeterminate="true"
+                        android:visibility="gone"
+                        app:indicatorColor="#88FFFFFF"
+                        app:trackColor="#33FFFFFF"
+                        app:trackCornerRadius="2dp"
+                        app:trackThickness="3dp"/>
+
+                    <!-- Tap for details hint -->
+                    <TextView
+                        android:id="@+id/tvTapDetails"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/tap_for_details"
+                        android:textColor="#88FFFFFF"
+                        android:textSize="12sp"
+                        android:visibility="gone"/>
+
+                </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Connecting progress indicator -->
-            <com.google.android.material.progressindicator.LinearProgressIndicator
-                android:id="@+id/progressBar"
+            <!-- Connection progress stepper (shown when connecting) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/stepperCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
-                android:indeterminate="true"
                 android:visibility="gone"
-                app:trackCornerRadius="4dp"/>
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:text="@string/connecting_steps_title"
+                        android:textSize="11sp"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.08"
+                        android:textColor="?attr/colorOnSurfaceVariant"/>
+
+                    <!-- Step 1: Resolving DNS -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <View
+                            android:id="@+id/step1Dot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:layout_marginEnd="12dp"
+                            android:background="@drawable/circle_status"/>
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/step_resolving_dns"
+                            android:textSize="14sp"
+                            android:textColor="?attr/colorOnSurface"/>
+
+                        <ImageView
+                            android:id="@+id/step1Check"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_step_check"
+                            android:visibility="gone"
+                            android:importantForAccessibility="no"/>
+
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="2dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="?attr/colorOutlineVariant"/>
+
+                    <!-- Step 2: Connecting TURN -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <View
+                            android:id="@+id/step2Dot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:layout_marginEnd="12dp"
+                            android:background="@drawable/circle_status"/>
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/step_connecting_turn"
+                            android:textSize="14sp"
+                            android:textColor="?attr/colorOnSurface"/>
+
+                        <ImageView
+                            android:id="@+id/step2Check"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_step_check"
+                            android:visibility="gone"
+                            android:importantForAccessibility="no"/>
+
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="2dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="?attr/colorOutlineVariant"/>
+
+                    <!-- Step 3: DTLS Handshake -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <View
+                            android:id="@+id/step3Dot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:layout_marginEnd="12dp"
+                            android:background="@drawable/circle_status"/>
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/step_dtls_handshake"
+                            android:textSize="14sp"
+                            android:textColor="?attr/colorOnSurface"/>
+
+                        <ImageView
+                            android:id="@+id/step3Check"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_step_check"
+                            android:visibility="gone"
+                            android:importantForAccessibility="no"/>
+
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="2dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="?attr/colorOutlineVariant"/>
+
+                    <!-- Step 4: Establishing connections (X/N) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <View
+                            android:id="@+id/step4Dot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:layout_marginEnd="12dp"
+                            android:background="@drawable/circle_status"/>
+
+                        <TextView
+                            android:id="@+id/step4Label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/step_establishing"
+                            android:textSize="14sp"
+                            android:textColor="?attr/colorOnSurface"/>
+
+                        <ImageView
+                            android:id="@+id/step4Check"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:src="@drawable/ic_step_check"
+                            android:visibility="gone"
+                            android:importantForAccessibility="no"/>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
 
             <!-- Connection settings card -->
             <com.google.android.material.card.MaterialCardView
@@ -218,7 +407,7 @@
 
                     </com.google.android.material.textfield.TextInputLayout>
 
-                    <!-- Server address field with history dropdown -->
+                    <!-- Server address field with favorites dropdown -->
                     <com.google.android.material.textfield.TextInputLayout
                         android:id="@+id/tilPeer"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
@@ -248,14 +437,27 @@
 
     </androidx.core.widget.NestedScrollView>
 
-    <!-- ExtendedFAB: Connect / Disconnect -->
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/fabConnect"
-        android:layout_width="wrap_content"
+    <!-- Full-width Connect / Disconnect button pinned to bottom -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="20dp"
-        android:text="@string/connect"
-        app:icon="@drawable/ic_connect_fab"/>
+        android:layout_gravity="bottom"
+        android:background="?attr/colorSurface"
+        android:elevation="8dp"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/fabConnect"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="@string/connect"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:stateListAnimator="@animator/btn_press_scale"
+            app:icon="@drawable/ic_connect_fab"
+            app:cornerRadius="16dp"/>
+
+    </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

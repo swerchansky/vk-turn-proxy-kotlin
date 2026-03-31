@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <!-- Shield outline -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,4 L8,14 L8,32 C8,46 18.5,57 32,62 C45.5,57 56,46 56,32 L56,14 Z" />
+
+    <!-- Arrow tunnel (dark cutout) -->
+    <path
+        android:fillColor="#00000033"
+        android:pathData="M24,42 L24,32 L18,32 L32,18 L46,32 L40,32 L40,42 Z" />
+
+</vector>

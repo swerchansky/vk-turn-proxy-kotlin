@@ -83,16 +83,13 @@ class DtlsServer(
     fun accept(): DtlsServerConnection {
         val clientAddr = newClients.take()
         val queue = connQueues[clientAddr]!!
-        log.info("DTLS: received first packet from $clientAddr (${queue.peek()?.size ?: 0} bytes), starting handshake")
+        log.info("DTLS: new client $clientAddr — starting handshake")
 
-        var sendCount = 0
-        var recvCount = 0
         val transport = object : DatagramTransport {
             override fun getSendLimit() = 1400
             override fun getReceiveLimit() = 1400
 
             override fun send(data: ByteArray, off: Int, len: Int) {
-                sendCount++
                 socket.send(DatagramPacket(data, off, len, clientAddr))
             }
 
@@ -100,26 +97,26 @@ class DtlsServer(
                 val packet = queue.poll(waitMillis.coerceAtLeast(1).toLong(), TimeUnit.MILLISECONDS)
                     ?: return -1
                 val copyLen = minOf(len, packet.size)
-                if (packet.size > len) log.warning("DTLS-server: recv packet ${packet.size}B > buf ${len}B, truncating!")
+                if (packet.size > len) {
+                    log.warning("DTLS-server: packet from $clientAddr ${packet.size}B > buf ${len}B, truncating!")
+                }
                 packet.copyInto(data, off, 0, copyLen)
-                recvCount++
-                log.fine("DTLS-server←client recv #$recvCount ${copyLen}B from $clientAddr  hdr=${packet.take(3).joinToString("") { "%02x".format(it) }}")
                 return copyLen
             }
 
             override fun close() {
-                log.info("DTLS-server: transport closed for $clientAddr (sent=$sendCount recv=$recvCount)")
+                log.fine("DTLS-server: transport closed for $clientAddr")
                 connQueues.remove(clientAddr)
             }
         }
 
         return try {
             val dtls = protocol.accept(GoodTurnTlsServer(crypto, cred), transport)
-            log.info("DTLS: handshake complete with $clientAddr")
+            log.info("DTLS: handshake OK with $clientAddr")
             DtlsServerConnection(dtls, readTimeoutMs) { connQueues.remove(clientAddr) }
         } catch (e: Exception) {
             connQueues.remove(clientAddr)
-            log.warning("DTLS: handshake failed with $clientAddr: ${e::class.simpleName}: ${e.message}")
+            log.warning("DTLS: handshake failed with $clientAddr — ${e::class.simpleName}: ${e.message}")
             throw e
         }
     }

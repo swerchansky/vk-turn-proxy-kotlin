@@ -67,36 +67,31 @@ class TurnClient private constructor(
         refreshTimer?.cancel()
         refreshTimer = null
         transport.close()
-        log.info("TURN: closed (relay=${relayAddress()})")
+        log.fine("TURN: closed (relay=${relayAddress()})")
     }
 
     // ── public API ─────────────────────────────────────────────────────────
 
     /** Allocates a relay socket. Must be called once before send/receive. */
     fun allocate() {
-        log.info("TURN alloc: user='${credentials.username}' server=${transport.javaClass.simpleName}")
+        log.fine("TURN alloc: user='${credentials.username}' transport=${transport.javaClass.simpleName}")
 
         val req1 = buildAllocateRequest()
         val resp1 = transport.sendReceive(req1)
             ?: error("TURN Allocate: no response")
-
-        logAttrs("resp1[cls=0x${resp1.cls.hex2()}]", resp1)
 
         if (resp1.cls == StunClass.ERROR) {
             val errCode = parseErrorCode(resp1)
             if (errCode == 401) {
                 realm = resp1.getAttr(StunAttr.REALM)?.decodeToString() ?: ""
                 nonce = resp1.getAttr(StunAttr.NONCE)?.decodeToString() ?: ""
-                log.info("TURN auth: realm='$realm'")
+                log.fine("TURN auth challenge: realm='$realm'")
 
                 val req2 = buildAllocateRequest()
                 addMessageIntegrity(req2)
-                logAttrs("req2[authenticated]", req2)
 
                 val resp2 = transport.sendReceive(req2)
                     ?: error("TURN Allocate (authenticated): no response")
-
-                logAttrs("resp2[cls=0x${resp2.cls.hex2()}]", resp2)
 
                 check(resp2.cls == StunClass.SUCCESS) {
                     "TURN Allocate failed: ${decodeErrorCode(resp2.getAttr(StunAttr.ERROR_CODE))}"
@@ -125,16 +120,16 @@ class TurnClient private constructor(
             addMessageIntegrity(req)
             val resp = transport.sendReceive(req)
             if (resp == null) {
-                log.warning("TURN Refresh: no response (allocation may have expired!)")
+                log.warning("TURN keepalive: no response — allocation may have expired (relay=${relayAddress()})")
                 return
             }
             if (resp.cls == StunClass.SUCCESS) {
-                log.info("TURN Refresh: OK, allocation kept alive")
+                log.fine("TURN keepalive: OK (relay=${relayAddress()})")
             } else {
-                log.warning("TURN Refresh failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}")
+                log.warning("TURN keepalive failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}")
             }
         } catch (e: Exception) {
-            log.warning("TURN Refresh exception: ${e.javaClass.name}: ${e.message}")
+            log.warning("TURN keepalive error: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
@@ -143,10 +138,7 @@ class TurnClient private constructor(
         val intervalMs = 5 * 60 * 1000L
         val timer = Timer("turn-refresh", true)
         timer.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                log.info("TURN Refresh: sending keepalive for relay=${relayAddress()}")
-                refresh()
-            }
+            override fun run() { refresh() }
         }, intervalMs, intervalMs)
         refreshTimer = timer
     }
@@ -164,7 +156,7 @@ class TurnClient private constructor(
     fun channelBind(peerIp: ByteArray, peerPort: Int, channel: Int = 0x4000) {
         check(channel in CHANNEL_DATA_MIN until CHANNEL_DATA_MAX) { "Invalid channel number" }
         val peerStr = peerIp.joinToString(".") { (it.toInt() and 0xFF).toString() } + ":$peerPort"
-        log.info("TURN channelBind: channel=0x${channel.toString(16)} peer=$peerStr")
+        log.fine("TURN channelBind: channel=0x${channel.toString(16)} peer=$peerStr")
         boundChannel = channel
 
         val req = StunMessage(StunMethod.CHANNEL_BIND, StunClass.REQUEST)
@@ -265,12 +257,12 @@ class TurnClient private constructor(
         val mac = Mac.getInstance("HmacSHA1").apply {
             init(SecretKeySpec(key, "HmacSHA1"))
         }.doFinal(macData)
-        logger("MI: keyInput='${credentials.username}:$realm:***' key=${key.hex()} mac=${mac.hex()}")
-        logger("MI: hmacData(${macData.size}B)=${macData.hex()}")
+        log.fine("MI: keyInput='${credentials.username}:$realm:***' mac=${mac.hex()}")
         msg.addAttr(StunAttr.MESSAGE_INTEGRITY, mac)
     }
 
     private fun logAttrs(prefix: String, msg: StunMessage) {
+        if (!log.isLoggable(java.util.logging.Level.FINE)) return
         msg.allAttrs().forEach { (t, v) ->
             val name = when (t) {
                 StunAttr.USERNAME -> "USERNAME"
@@ -290,7 +282,7 @@ class TurnClient private constructor(
                 StunAttr.ERROR_CODE -> decodeErrorCode(v)
                 else -> v.hex()
             }
-            logger("$prefix attr $name = $display")
+            log.fine("$prefix attr $name = $display")
         }
     }
 

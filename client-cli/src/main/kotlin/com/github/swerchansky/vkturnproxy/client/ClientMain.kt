@@ -39,13 +39,21 @@ import java.util.logging.Logger
 private val log: Logger = Logger.getLogger("client")
 
 fun main(args: Array<String>) {
-    // Load logging config from classpath
     val logConfig = object {}.javaClass.classLoader?.getResourceAsStream("logging.properties")
     if (logConfig != null) {
         java.util.logging.LogManager.getLogManager().readConfiguration(logConfig)
     }
     Security.addProvider(BouncyCastleProvider())
     ClientCommand().main(args)
+}
+
+private fun formatDuration(ms: Long): String {
+    val s = ms / 1000
+    return when {
+        s < 60 -> "${s}s"
+        s < 3600 -> "%dm%02ds".format(s / 60, s % 60)
+        else -> "%dh%02dm".format(s / 3600, (s % 3600) / 60)
+    }
 }
 
 private class ClientCommand : CliktCommand(name = "client") {
@@ -68,12 +76,17 @@ private class ClientCommand : CliktCommand(name = "client") {
         val peerAddr = parseAddr(peer)
         val listenAddr = parseAddr(listen)
         val isVk = vkLink != null
+        val providerName = if (isVk) "VK" else "Yandex"
+        val transport = if (useUdp) "UDP" else "TCP"
+        val mode = if (noDtls) "plain" else "DTLS/$transport"
 
         val rawLink = (if (isVk) vkLink!! else yandexLink!!)
             .let { if (isVk) it.split("join/").last() else it.split("j/").last() }
             .substringBefore("?").substringBefore("/").substringBefore("#")
 
         val n = if (nConnections > 0) nConnections else if (isVk) 16 else 1
+
+        log.info("Provider: $providerName · $n connections ($mode) · listen: $listen → peer: $peer")
 
         val httpClient = HttpClient(CIO) {
             install(WebSockets)
@@ -89,7 +102,7 @@ private class ClientCommand : CliktCommand(name = "client") {
 
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         Runtime.getRuntime().addShutdownHook(Thread {
-            log.info("Terminating...")
+            log.info("Shutting down...")
             scope.cancel()
             httpClient.close()
         })
@@ -101,20 +114,38 @@ private class ClientCommand : CliktCommand(name = "client") {
                 repeat(n) { idx ->
                     if (idx > 0) delay(200)
                     scope.launch {
-                        runTurnConnectionLoop(rawLink, provider, peerAddr, localSocket, turnHost, turnPort, useUdp)
+                        runTurnConnectionLoop(
+                            connIndex = idx + 1, connTotal = n,
+                            link = rawLink, provider = provider,
+                            peerAddr = peerAddr, localSocket = localSocket,
+                            turnHostOverride = turnHost, turnPortOverride = turnPort,
+                            useUdp = useUdp,
+                        )
                     }
                 }
             } else {
                 val firstReady = CompletableDeferred<Unit>()
                 scope.launch {
-                    runDtlsTurnConnection(rawLink, provider, peerAddr, localSocket, turnHost, turnPort, useUdp, firstReady)
+                    runDtlsTurnConnection(
+                        connIndex = 1, connTotal = n,
+                        link = rawLink, provider = provider,
+                        peerAddr = peerAddr, localSocket = localSocket,
+                        turnHostOverride = turnHost, turnPortOverride = turnPort,
+                        useUdp = useUdp, onDtlsReady = firstReady,
+                    )
                 }
                 firstReady.await()
-                log.info("First DTLS connection ready — starting ${n - 1} more")
-                repeat(n - 1) {
+                log.info("Tunnel ready — starting ${n - 1} more connections...")
+                repeat(n - 1) { idx ->
                     delay(200)
                     scope.launch {
-                        runDtlsTurnConnection(rawLink, provider, peerAddr, localSocket, turnHost, turnPort, useUdp, null)
+                        runDtlsTurnConnection(
+                            connIndex = idx + 2, connTotal = n,
+                            link = rawLink, provider = provider,
+                            peerAddr = peerAddr, localSocket = localSocket,
+                            turnHostOverride = turnHost, turnPortOverride = turnPort,
+                            useUdp = useUdp, onDtlsReady = null,
+                        )
                     }
                 }
             }
@@ -126,8 +157,9 @@ private class ClientCommand : CliktCommand(name = "client") {
 
 // ── DTLS + TURN connection ─────────────────────────────────────────────────
 
-@Suppress("ReturnCount", "LongMethod")
 private suspend fun runDtlsTurnConnection(
+    connIndex: Int,
+    connTotal: Int,
     link: String,
     provider: CredentialProvider,
     peerAddr: InetSocketAddress,
@@ -137,95 +169,101 @@ private suspend fun runDtlsTurnConnection(
     useUdp: Boolean,
     onDtlsReady: CompletableDeferred<Unit>?,
 ) {
+    val isFirst = onDtlsReady != null
+    val tag = "[$connIndex/$connTotal]"
+    val startMs = System.currentTimeMillis()
+
+    // Step 1: credentials
     val creds = try {
+        if (isFirst) log.info("$tag Getting TURN credentials...")
         provider.getCredentials(link)
     } catch (e: Exception) {
-        log.severe("Failed to get TURN credentials: ${e::class.qualifiedName}: ${e.message}\n${e.stackTraceToString()}")
+        log.severe("$tag Failed to get TURN credentials: ${e::class.qualifiedName}: ${e.message}")
+        onDtlsReady?.completeExceptionally(e)
         return
     }
-    val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
-    println(turnAddr.address.hostAddress)
 
-    // 1. TURN must be set up first — DTLS handshake travels through the relay
-    val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4 else RequestedAddressFamily.IPv6
+    val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
+    if (isFirst) log.info("$tag Credentials OK · TURN: $turnAddr · user: ${creds.username}")
+
+    // Step 2: TURN allocation
+    val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4
+                     else RequestedAddressFamily.IPv6
     val turnClient = try {
+        if (isFirst) log.info("$tag Connecting to TURN (${if (useUdp) "UDP" else "TCP"})...")
         TurnClient.connect(turnAddr, creds, useUdp, addrFamily)
     } catch (e: Exception) {
-        log.warning("TURN connect failed: ${e.message}")
+        log.warning("$tag TURN connect failed: ${e.message}")
+        onDtlsReady?.completeExceptionally(e)
         return
     }
 
     val dtls = DtlsClient()
     try {
         turnClient.allocate()
-        log.info("Connected! Relay: ${turnClient.relayAddress()}")
+        val relayStr = turnClient.relayAddress().toString()
+        if (isFirst) log.info("$tag TURN relay: $relayStr · channel → ${peerAddr.address.hostAddress}:${peerAddr.port}")
         turnClient.channelBind(peerAddr.address.address, peerAddr.port)
 
-        // 2. DTLS handshake over TURN relay (TurnDatagramTransport wraps turnClient)
+        // Step 3: DTLS handshake
+        val dtlsStart = System.currentTimeMillis()
+        if (isFirst) log.info("$tag DTLS handshake...")
         try {
-            val startMs = System.currentTimeMillis()
-            dtls.connectOverTurn(turnClient) { msg -> println(msg) }
-            log.info("DTLS handshake OK after ${System.currentTimeMillis() - startMs}ms")
+            dtls.connectOverTurn(turnClient)
+            val dtlsMs = System.currentTimeMillis() - dtlsStart
+            if (isFirst) {
+                log.info("$tag DTLS OK in ${dtlsMs}ms · total setup: ${System.currentTimeMillis() - startMs}ms")
+            } else {
+                log.info("$tag Connected ✓ relay: $relayStr · ${System.currentTimeMillis() - startMs}ms")
+            }
         } catch (e: Exception) {
-            log.warning("DTLS handshake failed: ${e.message}")
+            log.warning("$tag DTLS handshake failed: ${e.message}")
+            onDtlsReady?.completeExceptionally(e)
             return
         }
-        onDtlsReady?.complete(Unit)
-        log.info("Relay started — listening on ${localSocket.localSocketAddress}, peer=$peerAddr")
 
+        onDtlsReady?.complete(Unit)
+        if (isFirst) log.info("$tag Relay active · listening on ${localSocket.localSocketAddress}")
+
+        // Step 4: relay (no per-packet logs)
         val buf = ByteArray(1600)
         val dtlsBuf = ByteArray(1600)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
         var toServerPkts = 0
         var fromServerPkts = 0
 
-        // Both relay directions — coroutineScope cancels all children if either exits
         coroutineScope {
-            // localSocket → DTLS (encrypt) → TURN → server
             launch(Dispatchers.IO) {
                 try {
                     while (true) {
                         val pkt = DatagramPacket(buf, buf.size)
                         localSocket.receive(pkt)
-                        val from = InetSocketAddress(pkt.address, pkt.port)
-                        lastLocalAddr.set(from)
+                        lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
                         toServerPkts++
-                        if (toServerPkts <= 5 || toServerPkts % 100 == 0)
-                            log.info("→server pkt #$toServerPkts ${pkt.length}B from $from")
                         dtls.send(buf.copyOf(pkt.length))
                     }
                 } catch (e: Exception) {
-                    log.warning("localSocket→DTLS ended after $toServerPkts pkts: ${e.javaClass.name}: ${e.message}")
+                    log.fine("$tag WG→DTLS ended: ${e.javaClass.simpleName}")
                 }
             }
 
-            // server → TURN → DTLS (decrypt) → localSocket
-            @Suppress("LoopWithTooManyJumpStatements")
             launch(Dispatchers.IO) {
-                log.info("←server direction: waiting for first DTLS packet from server...")
                 try {
                     while (true) {
                         val n = dtls.receive(dtlsBuf)
-                        if (n < 0) {
-                            log.info("←server: dtls.receive() returned -1 (timeout), exiting relay")
-                            break
-                        }
+                        if (n < 0) break
                         fromServerPkts++
-                        val addr = lastLocalAddr.get()
-                        if (fromServerPkts <= 5 || fromServerPkts % 100 == 0)
-                            log.info("←server pkt #$fromServerPkts ${n}B → localAddr=${addr}")
-                        if (addr == null) {
-                            log.warning("←server: no local WireGuard addr yet, dropping pkt #$fromServerPkts")
-                            continue
-                        }
+                        val addr = lastLocalAddr.get() ?: continue
                         localSocket.send(DatagramPacket(dtlsBuf, n, addr))
                     }
                 } catch (e: Exception) {
-                    log.warning("DTLS→localSocket ended after $fromServerPkts pkts: ${e.javaClass.name}: ${e.message}")
+                    log.fine("$tag DTLS→WG ended: ${e.javaClass.simpleName}")
                 }
             }
         }
-        log.info("Relay done: →server=$toServerPkts pkts, ←server=$fromServerPkts pkts")
+
+        val dur = formatDuration(System.currentTimeMillis() - startMs)
+        log.info("$tag Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: $dur")
     } finally {
         dtls.close()
         turnClient.close()
@@ -234,8 +272,9 @@ private suspend fun runDtlsTurnConnection(
 
 // ── Direct TURN connection (--no-dtls) ────────────────────────────────────
 
-@Suppress("LoopWithTooManyJumpStatements")
 private suspend fun runTurnConnectionLoop(
+    connIndex: Int,
+    connTotal: Int,
     link: String,
     provider: CredentialProvider,
     peerAddr: InetSocketAddress,
@@ -244,58 +283,71 @@ private suspend fun runTurnConnectionLoop(
     turnPortOverride: String?,
     useUdp: Boolean,
 ) {
+    val tag = "[$connIndex/$connTotal]"
+    val startMs = System.currentTimeMillis()
+
     val creds = try {
+        if (connIndex == 1) log.info("$tag Getting TURN credentials...")
         provider.getCredentials(link)
     } catch (e: Exception) {
-        log.severe("Failed to get TURN credentials: ${e.message}")
+        log.severe("$tag Credentials failed: ${e.message}")
         return
     }
-    val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
-    println(turnAddr.address.hostAddress)
 
-    val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4 else RequestedAddressFamily.IPv6
-    val turnClient = TurnClient.connect(turnAddr, creds, useUdp, addrFamily)
+    val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
+    val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4
+                     else RequestedAddressFamily.IPv6
+    val turnClient = try {
+        TurnClient.connect(turnAddr, creds, useUdp, addrFamily)
+    } catch (e: Exception) {
+        log.warning("$tag TURN connect failed: ${e.message}")
+        return
+    }
 
     try {
         turnClient.allocate()
-        log.info("TURN relay: ${turnClient.relayAddress()}")
+        log.info("$tag TURN relay: ${turnClient.relayAddress()} · ${System.currentTimeMillis() - startMs}ms")
         turnClient.channelBind(peerAddr.address.address, peerAddr.port)
 
         val buf = ByteArray(1600)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
+        var toServerPkts = 0
+        var fromServerPkts = 0
 
         coroutineScope {
-            // localSocket → TURN
             launch(Dispatchers.IO) {
                 runCatching {
                     while (true) {
                         val pkt = DatagramPacket(buf, buf.size)
                         localSocket.receive(pkt)
                         lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
+                        toServerPkts++
                         turnClient.send(buf.copyOf(pkt.length))
                     }
-                }.onFailure { log.warning("localSocket→TURN ended: ${it.message}") }
-                // Close turnClient to unblock the receive loop in the other direction
+                }.onFailure { log.fine("$tag WG→TURN ended: ${it.javaClass.simpleName}") }
                 turnClient.close()
             }
 
-            // TURN → localSocket
             launch(Dispatchers.IO) {
                 runCatching {
                     while (true) {
                         val data = turnClient.receive() ?: continue
+                        fromServerPkts++
                         val addr = lastLocalAddr.get() ?: continue
                         localSocket.send(DatagramPacket(data, data.size, addr))
                     }
-                }.onFailure { log.warning("TURN→localSocket ended: ${it.message}") }
+                }.onFailure { log.fine("$tag TURN→WG ended: ${it.javaClass.simpleName}") }
             }
         }
+
+        val dur = formatDuration(System.currentTimeMillis() - startMs)
+        log.info("$tag Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: $dur")
     } finally {
         turnClient.close()
     }
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 private fun buildTurnAddr(creds: TurnCredentials, hostOverride: String?, portOverride: String?): InetSocketAddress {
     val parts = creds.address.split(":")

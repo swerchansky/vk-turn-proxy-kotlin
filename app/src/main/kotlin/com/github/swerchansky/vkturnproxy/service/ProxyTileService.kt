@@ -5,8 +5,8 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
+import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.ui.main.MainActivity
-import com.github.swerchansky.vkturnproxy.ui.main.ProxyState
 
 @RequiresApi(Build.VERSION_CODES.N)
 class ProxyTileService : TileService() {
@@ -17,7 +17,7 @@ class ProxyTileService : TileService() {
 
     override fun onClick() {
         val state = ProxyService.state.value
-        if (state is ProxyState.Connected || state is ProxyState.Connecting) {
+        if (state is ProxyConnectionState.Connected || state is ProxyConnectionState.Connecting) {
             startService(Intent(this, ProxyService::class.java).apply {
                 action = ProxyService.ACTION_STOP
             })
@@ -41,8 +41,8 @@ class ProxyTileService : TileService() {
         val tile = qsTile ?: return
         val state = ProxyService.state.value
         tile.state = when (state) {
-            is ProxyState.Connected -> Tile.STATE_ACTIVE
-            is ProxyState.Connecting -> Tile.STATE_UNAVAILABLE
+            is ProxyConnectionState.Connected -> Tile.STATE_ACTIVE
+            is ProxyConnectionState.Connecting -> Tile.STATE_UNAVAILABLE
             else -> Tile.STATE_INACTIVE
         }
         tile.updateTile()

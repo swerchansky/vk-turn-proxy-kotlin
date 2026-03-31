@@ -15,9 +15,11 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 
 private val log: Logger = Logger.getLogger("server")
+private val connCounter = AtomicInteger(0)
 
 fun main(args: Array<String>) {
     val logConfig = object {}.javaClass.classLoader?.getResourceAsStream("logging.properties")
@@ -26,6 +28,15 @@ fun main(args: Array<String>) {
     }
     Security.addProvider(BouncyCastleProvider())
     ServerCommand().main(args)
+}
+
+private fun formatDuration(ms: Long): String {
+    val s = ms / 1000
+    return when {
+        s < 60 -> "${s}s"
+        s < 3600 -> "%dm%02ds".format(s / 60, s % 60)
+        else -> "%dh%02dm".format(s / 3600, (s % 3600) / 60)
+    }
 }
 
 private class ServerCommand : CliktCommand(name = "server") {
@@ -39,7 +50,7 @@ private class ServerCommand : CliktCommand(name = "server") {
         val connectAddr = parseAddr(connect)
 
         val server = DtlsServer(listenAddr)
-        log.info("Listening on $listen")
+        log.info("Listening on $listen · WireGuard → $connect")
 
         runBlocking(Dispatchers.IO) {
             try {
@@ -60,63 +71,62 @@ private class ServerCommand : CliktCommand(name = "server") {
 }
 
 private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSocketAddress) {
-    log.info("Connection established, relaying to WireGuard at $wgAddr")
+    val id = connCounter.incrementAndGet()
+    val tag = "#$id"
+    val startMs = System.currentTimeMillis()
+
     val wgSocket = DatagramSocket().also {
         it.connect(wgAddr)
         it.soTimeout = 30 * 60 * 1000
     }
-    log.info("WireGuard socket bound to local port ${wgSocket.localPort}, connected to $wgAddr")
+    log.info("$tag DTLS connection established · WG local port: ${wgSocket.localPort} → $wgAddr")
+
     val buf = ByteArray(1600)
     val wgBuf = ByteArray(1600)
+    var dtlsToWg = 0
+    var wgToDtls = 0
 
-    coroutineScope {
-        // DTLS → WireGuard
-        launch(Dispatchers.IO) {
-            var count = 0
-            try {
-                while (true) {
-                    val n = conn.receive(buf)
-                    if (n < 0) { log.info("DTLS→WG: receive returned -1 (timeout/close) after $count pkts"); break }
-                    count++
-                    if (count <= 5 || count % 100 == 0)
-                        log.info("DTLS→WG pkt #$count ${n}B → WireGuard  hdr=${buf.take(3).joinToString("") { "%02x".format(it) }}")
-                    wgSocket.send(DatagramPacket(buf, n, wgAddr))
-                }
-            } catch (e: Exception) {
-                log.warning("DTLS→WG ended after $count pkts: ${e.javaClass.name}: ${e.message}")
-            } finally {
-                log.info("DTLS→WG: closing wgSocket to unblock WG→DTLS direction")
-                wgSocket.close()
-            }
-        }
-
-        // WireGuard → DTLS
-        launch(Dispatchers.IO) {
-            var count = 0
-            log.info("WG→DTLS: waiting for first packet from WireGuard on port ${wgSocket.localPort}...")
-            try {
-                while (true) {
-                    val pkt = DatagramPacket(wgBuf, wgBuf.size)
-                    wgSocket.receive(pkt)
-                    count++
-                    if (count <= 5 || count % 100 == 0) {
-                        val hdr = wgBuf.take(3).joinToString("") { "%02x".format(it) }
-                        log.info("WG→DTLS pkt #$count ${pkt.length}B from WireGuard  hdr=$hdr")
+    try {
+        coroutineScope {
+            // DTLS → WireGuard
+            launch(Dispatchers.IO) {
+                try {
+                    while (true) {
+                        val n = conn.receive(buf)
+                        if (n < 0) break
+                        dtlsToWg++
+                        wgSocket.send(DatagramPacket(buf, n, wgAddr))
                     }
-                    conn.send(wgBuf.copyOf(pkt.length))
+                } catch (e: Exception) {
+                    log.fine("$tag DTLS→WG ended: ${e.javaClass.simpleName}")
+                } finally {
+                    wgSocket.close()
                 }
-            } catch (e: Exception) {
-                log.warning("WG→DTLS ended after $count pkts: ${e.javaClass.name}: ${e.message}")
-            } finally {
-                log.info("WG→DTLS: closing DTLS conn to unblock DTLS→WG direction")
-                conn.close()
+            }
+
+            // WireGuard → DTLS
+            launch(Dispatchers.IO) {
+                try {
+                    while (true) {
+                        val pkt = DatagramPacket(wgBuf, wgBuf.size)
+                        wgSocket.receive(pkt)
+                        wgToDtls++
+                        conn.send(wgBuf.copyOf(pkt.length))
+                    }
+                } catch (e: Exception) {
+                    log.fine("$tag WG→DTLS ended: ${e.javaClass.simpleName}")
+                } finally {
+                    conn.close()
+                }
             }
         }
+    } finally {
+        wgSocket.close()
+        conn.close()
     }
 
-    wgSocket.close()
-    conn.close()
-    log.info("Connection fully closed")
+    val dur = formatDuration(System.currentTimeMillis() - startMs)
+    log.info("$tag Connection closed · ↑$wgToDtls ↓$dtlsToWg pkts · up: $dur")
 }
 
 private fun parseAddr(addr: String): InetSocketAddress {

@@ -3,6 +3,7 @@ package com.github.swerchansky.vkturnproxy.dtls
 import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import org.bouncycastle.tls.DatagramTransport
 import java.net.SocketTimeoutException
+import java.util.logging.Logger
 
 /**
  * Adapts [TurnClient] as a [DatagramTransport] for BouncyCastle DTLS.
@@ -10,41 +11,37 @@ import java.net.SocketTimeoutException
  */
 internal class TurnDatagramTransport(
     private val turnClient: TurnClient,
-    private val logger: (String) -> Unit = {},
 ) : DatagramTransport {
 
-    private var sentCount = 0
-    private var recvCount = 0
+    private val log = Logger.getLogger("turn-dtls-transport")
 
     override fun getSendLimit(): Int = 1500
     override fun getReceiveLimit(): Int = 1500
 
     override fun send(data: ByteArray, off: Int, len: Int) {
-        sentCount++
         val payload = if (off == 0 && len == data.size) data else data.copyOfRange(off, off + len)
         turnClient.send(payload)
     }
 
     override fun receive(data: ByteArray, off: Int, len: Int, waitMillis: Int): Int {
-        val isPostHandshake = waitMillis > 5_000
         val deadline = System.currentTimeMillis() + waitMillis.coerceAtLeast(1)
         while (true) {
             val remaining = (deadline - System.currentTimeMillis()).toInt()
             if (remaining <= 0) {
-                logger("DTLS←TURN: deadline expired after ${waitMillis}ms, returning -1")
+                log.fine("DTLS←TURN: deadline expired after ${waitMillis}ms")
                 return -1
             }
-            // Cap individual socket timeout to avoid blocking past deadline
             turnClient.setReceiveTimeout(remaining.coerceAtMost(2_000))
             try {
                 val payload = turnClient.receive()
                 if (payload == null) {
-                    logger("DTLS←TURN: non-ChannelData STUN message received, skipping (remaining=${remaining}ms)")
+                    // Non-ChannelData (STUN keepalive/indication) — normal, skip silently
                     continue
                 }
-                recvCount++
                 val copyLen = minOf(len, payload.size)
-                if (payload.size > len) logger("DTLS←TURN WARN: payload ${payload.size}B > buf $len B, truncating!")
+                if (payload.size > len) {
+                    log.warning("DTLS←TURN: payload ${payload.size}B > buffer ${len}B, truncating!")
+                }
                 payload.copyInto(data, off, 0, copyLen)
                 return copyLen
             } catch (_: SocketTimeoutException) {

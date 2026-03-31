@@ -62,6 +62,17 @@
     <string name="logs_empty">No logs yet.\nStart a connection to see output here.</string>
     <string name="jump_to_bottom">Jump to bottom</string>
     <string name="new_log_lines">%d new lines</string>
+    <string name="live_indicator">● LIVE</string>
+    <string name="toggle_timestamps">Show timestamps</string>
+    <string name="toggle_word_wrap">Word wrap</string>
+    <string name="log_filter_all">ALL</string>
+    <string name="log_filter_info">INFO</string>
+    <string name="log_filter_warn">WARN</string>
+    <string name="log_filter_error">ERROR</string>
+    <string name="log_filter_success">OK</string>
+    <string name="log_line_copy">Copy line</string>
+    <string name="log_line_search">Search this text</string>
+    <string name="log_line_share">Share line</string>
 
     <!-- Connection detail sheet -->
     <string name="detail_title">Connection Details</string>
@@ -113,4 +124,16 @@
     <string name="share_chooser_title">Share logs via…</string>
     <string name="share_received_link">VK link received — tap to fill</string>
     <string name="fill_link">Fill</string>
+
+    <!-- Connecting stepper -->
+    <string name="connecting_steps_title">Progress</string>
+    <string name="step_resolving_dns">Resolving DNS</string>
+    <string name="step_connecting_turn">Connecting TURN</string>
+    <string name="step_dtls_handshake">DTLS Handshake</string>
+    <string name="step_establishing">Establishing connections</string>
+    <string name="step_establishing_fmt">Establishing connections (%d/%d)</string>
+
+    <!-- Quick options -->
+    <string name="quick_options_title">Quick Options</string>
+    <string name="quick_options_connections">Parallel connections: %d</string>
 </resources>

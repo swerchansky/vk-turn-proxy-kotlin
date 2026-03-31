@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
@@ -83,6 +85,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         applyWindowInsets()
+        applySystemBarAppearance()
 
         if (savedInstanceState == null) {
             val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -140,18 +143,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupBadge() {
+        var prevLineCount = 0
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                var prevLineCount = 0
-                viewModel.log.collect { log ->
-                    val lines = if (log.isEmpty()) 0 else log.count { it == '\n' } + 1
-                    val newLines = (lines - prevLineCount).coerceAtLeast(0)
+                viewModel.logLineCount.collect { lineCount ->
+                    val newLines = (lineCount - prevLineCount).coerceAtLeast(0)
                     if (newLines > 0 && binding.bottomNav.selectedItemId != R.id.nav_logs) {
                         val badge = binding.bottomNav.getOrCreateBadge(R.id.nav_logs)
                         badge.isVisible = true
                         badge.number = badge.number + newLines
                     }
-                    prevLineCount = lines
+                    prevLineCount = lineCount
                 }
             }
         }
@@ -161,6 +163,15 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.getBadge(R.id.nav_logs)?.let {
             it.isVisible = false
             it.clearNumber()
+        }
+    }
+
+    private fun applySystemBarAppearance() {
+        val isLight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_NO
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = isLight
+            isAppearanceLightNavigationBars = isLight
         }
     }
 

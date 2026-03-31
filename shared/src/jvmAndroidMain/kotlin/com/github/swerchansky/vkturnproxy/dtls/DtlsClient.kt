@@ -40,6 +40,7 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.security.SecureRandom
 import java.util.Date
+import java.util.logging.Logger
 
 /**
  * DTLS 1.2 client using BouncyCastle bctls.
@@ -50,6 +51,7 @@ class DtlsClient(
     private val readTimeoutMs: Int = 30 * 60 * 1000,
 ) : Closeable {
 
+    private val log = Logger.getLogger("dtls-client")
     private var socket: DatagramSocket? = null
     private var dtlsTransport: DTLSTransport? = null
 
@@ -65,15 +67,15 @@ class DtlsClient(
     fun connect(transport: DatagramTransport) = connectWith(transport)
 
     /** Connect through a TURN relay — DTLS packets are sent/received via [turnClient]. */
-    fun connectOverTurn(turnClient: TurnClient, logger: (String) -> Unit = {}) =
-        connectWith(TurnDatagramTransport(turnClient, logger), logger)
+    fun connectOverTurn(turnClient: TurnClient) =
+        connectWith(TurnDatagramTransport(turnClient))
 
-    private fun connectWith(transport: DatagramTransport, logger: (String) -> Unit = {}) {
+    private fun connectWith(transport: DatagramTransport) {
         val crypto = BcTlsCrypto(SecureRandom())
-        logger("DTLS-client: starting BouncyCastle handshake (DTLS 1.2, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)")
+        log.fine("DTLS-client: starting handshake (DTLS 1.2, ECDHE-ECDSA-AES128-GCM-SHA256)")
         val t0 = System.currentTimeMillis()
         dtlsTransport = DTLSClientProtocol().connect(GoodTurnTlsClient(crypto), transport)
-        logger("DTLS-client: handshake complete in ${System.currentTimeMillis() - t0}ms")
+        log.fine("DTLS-client: handshake complete in ${System.currentTimeMillis() - t0}ms")
     }
 
     fun send(data: ByteArray) {

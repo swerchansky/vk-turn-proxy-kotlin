@@ -9,21 +9,21 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
+import com.github.swerchansky.vkturnproxy.data.repository.ProxyRepository
 import com.github.swerchansky.vkturnproxy.databinding.BottomSheetConnectionDetailBinding
-import com.github.swerchansky.vkturnproxy.ui.main.MainViewModel
-import com.github.swerchansky.vkturnproxy.ui.main.ProxyState
+import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.inject.Inject
 
 class ConnectionDetailSheet : BottomSheetDialogFragment() {
 
@@ -31,11 +31,10 @@ class ConnectionDetailSheet : BottomSheetDialogFragment() {
         fun newInstance() = ConnectionDetailSheet()
     }
 
+    @Inject lateinit var proxyRepository: ProxyRepository
+
     private var _binding: BottomSheetConnectionDetailBinding? = null
     private val binding get() = _binding!!
-
-    private val appComponent get() = (requireActivity().application as App).appComponent
-    private val viewModel: MainViewModel by activityViewModels { appComponent.viewModelFactory() }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = BottomSheetConnectionDetailBinding.inflate(inflater, container, false)
@@ -44,6 +43,7 @@ class ConnectionDetailSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        (requireActivity().application as App).appComponent.inject(this)
         setupCopyButton()
         observeStats()
         observeState()
@@ -62,11 +62,11 @@ class ConnectionDetailSheet : BottomSheetDialogFragment() {
     private fun observeState() {
         viewLifecycleOwner.lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.state.collect { state ->
+                proxyRepository.connectionState.collect { state ->
                     val colorRes = when (state) {
-                        is ProxyState.Connected -> R.color.status_connected
-                        is ProxyState.Connecting -> R.color.status_connecting
-                        is ProxyState.Error -> R.color.status_error
+                        is ProxyConnectionState.Connected -> R.color.status_connected
+                        is ProxyConnectionState.Connecting -> R.color.status_connecting
+                        is ProxyConnectionState.Error -> R.color.status_error
                         else -> R.color.status_idle
                     }
                     val color = ContextCompat.getColor(requireContext(), colorRes)
@@ -80,7 +80,7 @@ class ConnectionDetailSheet : BottomSheetDialogFragment() {
     private fun observeStats() {
         viewLifecycleOwner.lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.stats.collect { stats ->
+                proxyRepository.stats.collect { stats ->
                     binding.tvRelayAddr.text = stats.relayAddr.ifEmpty { "—" }
                     binding.tvPktsSent.text = stats.toServerPkts.toString()
                     binding.tvPktsRecv.text = stats.fromServerPkts.toString()
