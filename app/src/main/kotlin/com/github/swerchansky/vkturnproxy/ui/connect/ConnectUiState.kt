@@ -98,7 +98,6 @@ private fun formatDuration(seconds: Long): String {
     return "%02d:%02d:%02d".format(h, m, s)
 }
 
-@Suppress("ImplicitDefaultLocale")
 private fun formatPackets(count: Long): String = when {
     count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f)
     count >= 1_000 -> String.format("%.1fK", count / 1_000f)
