@@ -60,7 +60,6 @@ class ProxyService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "proxy_channel"
 
-        @Suppress("ImplicitDefaultLocale")
         fun formatPackets(count: Long): String = when {
             count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000f)
             count >= 1_000 -> String.format("%.1fK", count / 1_000f)
@@ -187,7 +186,6 @@ class ProxyService : Service() {
             .createNotificationChannel(channel)
     }
 
-    @Suppress("LongMethod")
     private suspend fun runProxy(
         rawLink: String,
         peerAddress: String,
@@ -335,7 +333,6 @@ class ProxyService : Service() {
 
 // ── Single DTLS + TURN connection ──────────────────────────────────────────
 
-@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 private suspend fun runSingleDtlsConnection(
     connIndex: Int,
     connTotal: Int,

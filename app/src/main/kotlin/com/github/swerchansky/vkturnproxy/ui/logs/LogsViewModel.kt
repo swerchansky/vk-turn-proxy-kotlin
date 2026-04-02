@@ -42,7 +42,6 @@ class LogsViewModel @Inject constructor(
         }
     }
 
-    @Suppress("CyclomaticComplexMethod")
     override fun handleIntent(intent: LogsIntent) { when (intent) {
         is LogsIntent.SearchQueryChanged ->
             _dataState.update { it.copy(searchQuery = intent.query) }

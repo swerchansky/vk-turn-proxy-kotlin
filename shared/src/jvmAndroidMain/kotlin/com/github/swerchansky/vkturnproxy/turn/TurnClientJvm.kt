@@ -41,6 +41,8 @@ class TurnClient private constructor(
     private var allocatedIp: ByteArray = ByteArray(4)
     private var allocatedPort: Int = 0
     private var boundChannel: Int = -1
+    private var boundPeerIp: ByteArray = ByteArray(4)
+    private var boundPeerPort: Int = 0
     private var refreshTimer: Timer? = null
 
     // ── lifecycle ──────────────────────────────────────────────────────────
@@ -111,22 +113,35 @@ class TurnClient private constructor(
         log.info("TURN allocated relay=${relayAddress()}")
     }
 
-    /** Sends a TURN Refresh to keep the allocation alive. */
+    /**
+     * Sends a TURN Refresh + ChannelBind refresh to keep the allocation and channel alive.
+     *
+     * Uses fire-and-forget (sendRaw only, no concurrent read) to avoid racing with the relay
+     * loop that is already reading from the same transport stream. Responses will arrive on the
+     * stream and be consumed + discarded by the relay loop's receive() call as non-ChannelData
+     * STUN messages, which is correct per RFC 5766.
+     */
     private fun refresh() {
         try {
-            val req = StunMessage(StunMethod.REFRESH, StunClass.REQUEST)
-            // LIFETIME: 600 seconds (10 minutes)
-            req.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, 0x02, 0x58))
-            addMessageIntegrity(req)
-            val resp = transport.sendReceive(req)
-            if (resp == null) {
-                log.warning("TURN keepalive: no response — allocation may have expired (relay=${relayAddress()})")
-                return
-            }
-            if (resp.cls == StunClass.SUCCESS) {
-                log.fine("TURN keepalive: OK (relay=${relayAddress()})")
-            } else {
-                log.warning("TURN keepalive failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}")
+            // Refresh allocation (LIFETIME = 600 s = 10 min)
+            val allocReq = StunMessage(StunMethod.REFRESH, StunClass.REQUEST)
+            allocReq.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, 0x02, 0x58))
+            addMessageIntegrity(allocReq)
+            transport.sendRaw(allocReq.encode())
+            log.fine("TURN keepalive: REFRESH sent (relay=${relayAddress()})")
+
+            // Refresh channel binding — channel bindings have their own 10-min lifetime
+            // (RFC 5766 §11.3) that is NOT renewed by the allocation Refresh above.
+            if (boundChannel >= 0) {
+                val chReq = StunMessage(StunMethod.CHANNEL_BIND, StunClass.REQUEST)
+                val chBuf = ByteArray(4)
+                chBuf[0] = (boundChannel ushr 8).toByte()
+                chBuf[1] = (boundChannel and 0xFF).toByte()
+                chReq.addAttr(StunAttr.CHANNEL_NUMBER, chBuf)
+                chReq.addXorIpv4Attr(StunAttr.XOR_PEER_ADDRESS, boundPeerIp, boundPeerPort)
+                addMessageIntegrity(chReq)
+                transport.sendRaw(chReq.encode())
+                log.fine("TURN keepalive: CHANNEL_BIND refresh sent (channel=0x${boundChannel.toString(16)})")
             }
         } catch (e: Exception) {
             log.warning("TURN keepalive error: ${e.javaClass.simpleName}: ${e.message}")
@@ -158,6 +173,8 @@ class TurnClient private constructor(
         val peerStr = peerIp.joinToString(".") { (it.toInt() and 0xFF).toString() } + ":$peerPort"
         log.fine("TURN channelBind: channel=0x${channel.toString(16)} peer=$peerStr")
         boundChannel = channel
+        boundPeerIp = peerIp.copyOf()
+        boundPeerPort = peerPort
 
         val req = StunMessage(StunMethod.CHANNEL_BIND, StunClass.REQUEST)
         // CHANNEL-NUMBER: 2-byte channel + 2-byte reserved
