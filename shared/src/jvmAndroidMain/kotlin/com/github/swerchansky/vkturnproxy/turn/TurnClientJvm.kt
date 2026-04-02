@@ -128,7 +128,6 @@ class TurnClient private constructor(
             allocReq.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, 0x02, 0x58))
             addMessageIntegrity(allocReq)
             transport.sendRaw(allocReq.encode())
-            log.fine("TURN keepalive: REFRESH sent (relay=${relayAddress()})")
 
             // Refresh channel binding — channel bindings have their own 10-min lifetime
             // (RFC 5766 §11.3) that is NOT renewed by the allocation Refresh above.
@@ -141,10 +140,14 @@ class TurnClient private constructor(
                 chReq.addXorIpv4Attr(StunAttr.XOR_PEER_ADDRESS, boundPeerIp, boundPeerPort)
                 addMessageIntegrity(chReq)
                 transport.sendRaw(chReq.encode())
-                log.fine("TURN keepalive: CHANNEL_BIND refresh sent (channel=0x${boundChannel.toString(16)})")
+                logger("Keepalive sent · relay=${relayAddress()}")
+            } else {
+                logger("Keepalive sent · relay=${relayAddress()} (no channel)")
             }
         } catch (e: Exception) {
-            log.warning("TURN keepalive error: ${e.javaClass.simpleName}: ${e.message}")
+            val msg = "${e.javaClass.simpleName}: ${e.message}"
+            log.warning("TURN keepalive error: $msg")
+            logger("Keepalive error: $msg")
         }
     }
 

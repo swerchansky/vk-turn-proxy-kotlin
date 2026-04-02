@@ -373,7 +373,7 @@ private suspend fun runSingleDtlsConnection(
     onStepChange?.invoke("Connecting TURN")
     val turnClient = try {
         if (isFirst) logger("$tag Connecting to TURN (TCP)...")
-        TurnClient.connect(turnAddr, creds, true, addrFamily)
+        TurnClient.connect(turnAddr, creds, true, addrFamily, logger = { logger("$tag $it") })
     } catch (e: Exception) {
         logger("$tag TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
         firstReady?.completeExceptionally(e)
