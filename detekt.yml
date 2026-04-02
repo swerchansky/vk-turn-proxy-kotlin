@@ -90,6 +90,8 @@ potential-bugs:
     active: false
   DontDowncastCollectionTypes:
     active: false
+  ImplicitDefaultLocale:
+    active: false
 
 # ── Style ─────────────────────────────────────────────────────────────────────
 style:
