@@ -1,4 +1,4 @@
-package com.github.swerchansky.vkturnproxy.turn
+package com.github.swerchansky.vkturnproxy.stun
 
 import java.security.SecureRandom
 

@@ -1,7 +1,7 @@
 package com.github.swerchansky.vkturnproxy.di
 
-import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
-import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCaptchaHandler
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import dagger.Module
 import dagger.Provides
@@ -23,11 +23,15 @@ class NetworkModule {
     }
 
     @Provides @Singleton
-    fun provideVkCaptchaSolver(client: HttpClient, logger: ProxyLogger): VkCaptchaSolver =
-        VkCaptchaSolver(client, logger = logger)
+    fun provideVkCaptchaHandler(client: HttpClient, logger: ProxyLogger): VkCaptchaHandler =
+        VkCaptchaHandler(client, logger = logger)
 
     @Provides @Singleton
-    fun provideVkCredentialProvider(client: HttpClient, captchaSolver: VkCaptchaSolver, logger: ProxyLogger): VkCredentialProvider =
-        VkCredentialProvider(client = client, captchaSolver = captchaSolver, logger = logger)
+    fun provideVkCredentialProvider(
+        client: HttpClient,
+        captchaHandler: VkCaptchaHandler,
+        logger: ProxyLogger
+    ): VkCredentialProvider =
+        VkCredentialProvider(client = client, captchaHandler = captchaHandler, logger = logger)
 
 }

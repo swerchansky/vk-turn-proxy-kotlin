@@ -3,7 +3,7 @@ package com.github.swerchansky.vkturnproxy.ui.connect
 import androidx.lifecycle.viewModelScope
 import com.github.swerchansky.vkturnproxy.data.preferences.AppPreferences
 import com.github.swerchansky.vkturnproxy.data.repository.ProxyRepository
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.ui.base.BaseViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

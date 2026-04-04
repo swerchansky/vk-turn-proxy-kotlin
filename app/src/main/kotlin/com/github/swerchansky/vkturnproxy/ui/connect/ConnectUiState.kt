@@ -1,7 +1,7 @@
 package com.github.swerchansky.vkturnproxy.ui.connect
 
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyStats
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyStats
 
 enum class StatusColor { IDLE, CONNECTING, CONNECTED, ERROR }
 

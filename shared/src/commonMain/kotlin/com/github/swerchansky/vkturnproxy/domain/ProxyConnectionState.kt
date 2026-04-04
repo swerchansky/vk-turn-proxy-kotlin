@@ -1,4 +1,6 @@
-package com.github.swerchansky.vkturnproxy.domain.model
+package com.github.swerchansky.vkturnproxy.domain
+
+import com.github.swerchansky.vkturnproxy.error.TurnProxyError
 
 sealed class ProxyConnectionState {
     object Idle : ProxyConnectionState()
@@ -7,6 +9,8 @@ sealed class ProxyConnectionState {
         val connectedCount: Int = 0,
         val totalConnections: Int = 0,
     ) : ProxyConnectionState()
+
     data class Connected(val turnAddr: String) : ProxyConnectionState()
-    data class Error(val message: String) : ProxyConnectionState()
+    data class Error(val message: String, val cause: TurnProxyError? = null) :
+        ProxyConnectionState()
 }

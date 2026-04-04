@@ -2,8 +2,8 @@ package com.github.swerchansky.vkturnproxy.data.repository
 
 import android.app.Application
 import android.content.Intent
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyStats
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyStats
 import com.github.swerchansky.vkturnproxy.service.ProxyService
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject

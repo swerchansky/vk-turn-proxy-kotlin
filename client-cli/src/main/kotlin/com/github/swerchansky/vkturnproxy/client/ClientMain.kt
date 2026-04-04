@@ -6,11 +6,13 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
-import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
-import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCaptchaHandler
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.logging.JvmProxyLogger
+import com.github.swerchansky.vkturnproxy.proxy.TunnelEvent
+import com.github.swerchansky.vkturnproxy.proxy.TunnelParams
+import com.github.swerchansky.vkturnproxy.proxy.TurnProxyEngine
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
-import com.github.swerchansky.vkturnproxy.proxy.runProxyConnections
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -72,7 +74,7 @@ private class ClientCommand : CliktCommand(name = "client") {
 
         val provider = VkCredentialProvider(
             httpClient,
-            VkCaptchaSolver(httpClient, logger = log),
+            VkCaptchaHandler(httpClient, logger = log),
             logger = log,
         )
 
@@ -85,24 +87,40 @@ private class ClientCommand : CliktCommand(name = "client") {
 
         runBlocking(Dispatchers.IO) {
             val localSocket = DatagramSocket(listenAddr)
-            runProxyConnections(
-                link = rawLink,
-                peerAddr = peerAddr,
-                localSocket = localSocket,
-                provider = provider,
-                nConnections = nConnections,
-                useDtls = !noDtls,
-                turnHostOverride = turnHost,
-                turnPortOverride = turnPort,
-                logger = log,
-                onFirstReady = { relayAddr ->
-                    log.info("client", "Tunnel ready · relay: $relayAddr · listening on $listen")
-                },
-                onConnectionReady = { c, total, _ ->
-                    if (c < total) log.info("client", "Establishing connections $c/$total...")
-                    else log.info("client", "All $total/$total connections established")
-                },
-            )
+            val engine = TurnProxyEngine(provider, log)
+            engine.runConnections(
+                TunnelParams(
+                    link = rawLink,
+                    peerAddr = peerAddr,
+                    localSocket = localSocket,
+                    nConnections = nConnections,
+                    useDtls = !noDtls,
+                    turnHostOverride = turnHost,
+                    turnPortOverride = turnPort,
+                )
+            ).collect { event ->
+                when (event) {
+                    is TunnelEvent.FirstReady ->
+                        log.info(
+                            "client",
+                            "Tunnel ready · relay: ${event.relayAddr} · listening on $listen"
+                        )
+
+                    is TunnelEvent.ConnectionReady ->
+                        if (event.count < event.total)
+                            log.info(
+                                "client",
+                                "Establishing connections ${event.count}/${event.total}..."
+                            )
+                        else
+                            log.info(
+                                "client",
+                                "All ${event.total}/${event.total} connections established"
+                            )
+
+                    else -> {}
+                }
+            }
         }
     }
 }

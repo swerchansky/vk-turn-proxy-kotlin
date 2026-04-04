@@ -9,13 +9,17 @@ import com.github.swerchansky.vkturnproxy.turn.RequestedAddressFamily
 import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import com.github.swerchansky.vkturnproxy.turn.TurnCredentials
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 fun parseTurnProxyAddr(addr: String): InetSocketAddress {
@@ -34,334 +38,316 @@ fun formatTurnProxyDuration(ms: Long): String {
 }
 
 /**
- * Launches N parallel TURN connections with DTLS (or plain TURN) relay.
+ * Orchestrates N parallel TURN connections with DTLS (or plain TURN) relay.
  *
- * The first connection completes fully before the remaining N-1 are started
- * (staggered 200 ms apart). Suspends until all connections close.
+ * Emits [TunnelEvent]s as the tunnel progresses.
+ * Exposes [toServerPackets] / [fromServerPackets] counters updated on every relayed packet.
  *
- * @param link               Raw link token (already stripped of URL prefix).
- * @param peerAddr           Remote peer (server) address.
- * @param localSocket        Local UDP socket to forward traffic to/from.
- * @param provider           Credential provider (VK or Yandex).
- * @param nConnections       Total number of parallel connections.
- * @param useDtls            Wrap data in DTLS (default: true).
- * @param turnHostOverride   Override the TURN host extracted from credentials.
- * @param turnPortOverride   Override the TURN port extracted from credentials.
- * @param logger             Sink for human-readable log lines.
- * @param onStepChange       Called when the setup phase changes (first connection only).
- * @param onFirstReady       Called once the first connection is fully established,
- *                           with its relay address string.
- * @param onConnectionReady  Called each time any connection becomes ready.
- *                           Receives (connectedCount, totalConnections, relayAddr).
- * @param onPacketToServer   Called for every packet sent toward the TURN relay.
- * @param onPacketFromServer Called for every packet received from the TURN relay.
+ * Usage:
+ * ```
+ * val engine = TurnProxyEngine(credentialProvider, logger)
+ * engine.runConnections(params).collect { event -> ... }
+ * ```
  */
-suspend fun runProxyConnections(
-    link: String,
-    peerAddr: InetSocketAddress,
-    localSocket: DatagramSocket,
-    provider: CredentialProvider,
-    nConnections: Int,
-    useDtls: Boolean = true,
-    turnHostOverride: String? = null,
-    turnPortOverride: String? = null,
-    logger: ProxyLogger = NoOpLogger,
-    onStepChange: ((String) -> Unit)? = null,
-    onFirstReady: (relayAddr: String) -> Unit = {},
-    onConnectionReady: (connectedCount: Int, total: Int, relayAddr: String) -> Unit = { _, _, _ -> },
-    onPacketToServer: () -> Unit = {},
-    onPacketFromServer: () -> Unit = {},
+class TurnProxyEngine(
+    private val credentialProvider: CredentialProvider,
+    private val logger: ProxyLogger = NoOpLogger,
 ) {
-    val firstReady = CompletableDeferred<String>()
-    val readyCount = AtomicInteger(0)
+    val toServerPackets = AtomicLong(0)
+    val fromServerPackets = AtomicLong(0)
 
-    coroutineScope {
-        // First connection: full step logging, blocks N-1 launch until DTLS is ready
-        launch {
-            runSingleTurnConnection(
-                connIndex = 1, connTotal = nConnections,
-                link = link, provider = provider,
-                peerAddr = peerAddr, localSocket = localSocket,
-                useDtls = useDtls,
-                turnHostOverride = turnHostOverride, turnPortOverride = turnPortOverride,
-                firstReady = firstReady,
-                onStepChange = onStepChange,
-                onReady = { relayAddr ->
-                    val c = readyCount.incrementAndGet()
-                    onConnectionReady(c, nConnections, relayAddr)
-                },
-                onPacketToServer = onPacketToServer,
-                onPacketFromServer = onPacketFromServer,
-                logger = logger,
-            )
-        }
+    /**
+     * Returns a [Flow] that runs all [TunnelParams.nConnections] parallel TURN connections
+     * and emits [TunnelEvent]s until all connections close.
+     *
+     * The first connection completes fully before the remaining N-1 are started
+     * (staggered [TurnProxyConfig.STAGGERED_CONNECTION_DELAY_MS] ms apart).
+     */
+    fun runConnections(params: TunnelParams): Flow<TunnelEvent> = channelFlow {
+        val firstReady = CompletableDeferred<String>()
+        val readyCount = AtomicInteger(0)
+        toServerPackets.set(0)
+        fromServerPackets.set(0)
 
-        val relayAddr = firstReady.await()
-        onFirstReady(relayAddr)
-
-        // Remaining N-1 connections, staggered apart
-        repeat(nConnections - 1) { idx ->
-            delay(TurnProxyConfig.STAGGERED_CONNECTION_DELAY_MS)
+        coroutineScope {
+            // First connection: full step logging, signals firstReady when DTLS is up
             launch {
-                runSingleTurnConnection(
-                    connIndex = idx + 2, connTotal = nConnections,
-                    link = link, provider = provider,
-                    peerAddr = peerAddr, localSocket = localSocket,
-                    useDtls = useDtls,
-                    turnHostOverride = turnHostOverride, turnPortOverride = turnPortOverride,
-                    firstReady = null,
-                    onStepChange = null,
-                    onReady = { _ ->
+                runSingleConnection(
+                    connIndex = 1, params = params,
+                    firstReady = firstReady,
+                    onReady = { relayAddr ->
                         val c = readyCount.incrementAndGet()
-                        onConnectionReady(c, nConnections, relayAddr)
+                        trySend(TunnelEvent.ConnectionReady(c, params.nConnections, relayAddr))
                     },
-                    onPacketToServer = onPacketToServer,
-                    onPacketFromServer = onPacketFromServer,
-                    logger = logger,
                 )
+            }
+
+            val relayAddr = firstReady.await()
+            send(TunnelEvent.FirstReady(relayAddr))
+
+            // Remaining N-1 connections, staggered apart
+            repeat(params.nConnections - 1) { idx ->
+                delay(TurnProxyConfig.STAGGERED_CONNECTION_DELAY_MS)
+                launch {
+                    runSingleConnection(
+                        connIndex = idx + 2, params = params,
+                        firstReady = null,
+                        onReady = { _ ->
+                            val c = readyCount.incrementAndGet()
+                            trySend(TunnelEvent.ConnectionReady(c, params.nConnections, relayAddr))
+                        },
+                    )
+                }
             }
         }
     }
-}
 
-/**
- * Runs a single TURN connection (with optional DTLS) until the relay closes.
- *
- * Steps:
- *  1. Fetch credentials via [provider].
- *  2. Connect to the TURN server and allocate a relay.
- *  3. If [useDtls]: perform DTLS handshake over the TURN relay.
- *  4. Bidirectional relay between [localSocket] and the TURN relay.
- *
- * @param firstReady  If non-null, completed with the relay address string once the
- *                    connection is fully established (DTLS handshake done). The caller
- *                    awaits this to know when to start additional connections.
- */
-suspend fun runSingleTurnConnection(
-    connIndex: Int,
-    connTotal: Int,
-    link: String,
-    provider: CredentialProvider,
-    peerAddr: InetSocketAddress,
-    localSocket: DatagramSocket,
-    useDtls: Boolean = true,
-    turnHostOverride: String? = null,
-    turnPortOverride: String? = null,
-    firstReady: CompletableDeferred<String>? = null,
-    onStepChange: ((String) -> Unit)? = null,
-    onReady: (String) -> Unit = {},
-    onPacketToServer: () -> Unit = {},
-    onPacketFromServer: () -> Unit = {},
-    logger: ProxyLogger = NoOpLogger,
-) {
-    val isFirst = firstReady != null
-    val tag = "[$connIndex/$connTotal]"
-    val startMs = System.currentTimeMillis()
+    // ── Single connection ──────────────────────────────────────────────────
 
-    // ── Step 1: credentials ────────────────────────────────────────────────
-    onStepChange?.invoke("Resolving DNS")
-    val creds = try {
-        if (isFirst) logger.info(tag, "Getting TURN credentials...")
-        provider.getCredentials(link)
-    } catch (e: Exception) {
-        logger.info(tag, "Credentials failed: ${e.message}")
-        firstReady?.completeExceptionally(e)
-        return
-    }
+    private suspend fun ProducerScope<TunnelEvent>.runSingleConnection(
+        connIndex: Int,
+        params: TunnelParams,
+        firstReady: CompletableDeferred<String>?,
+        onReady: (String) -> Unit,
+    ) {
+        val isFirst = firstReady != null
+        val tag = "[$connIndex/${params.nConnections}]"
+        val startMs = System.currentTimeMillis()
 
-    val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
-    if (isFirst) logger.info(tag, "Credentials OK · TURN: $turnAddr · user: ${creds.username}")
-
-    // ── Step 2: TURN allocation ────────────────────────────────────────────
-    onStepChange?.invoke("Connecting TURN")
-    val addrFamily = if (peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4
-                     else RequestedAddressFamily.IPv6
-
-    val turnClient = try {
-        if (isFirst) logger.info(tag, "Connecting to TURN (UDP)...")
-        TurnClient.connect(turnAddr, creds, addrFamily, logger = logger)
-    } catch (e: Exception) {
-        logger.info(tag, "TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
-        firstReady?.completeExceptionally(e)
-        return
-    }
-
-    try {
-        turnClient.allocate()
-        val relayStr = turnClient.relayAddress().toString()
-        if (isFirst) logger.info(tag, "TURN relay: $relayStr · channel → ${peerAddr.address.hostAddress}:${peerAddr.port}")
-        turnClient.channelBind(peerAddr.address.address, peerAddr.port)
-
-        val relayAddr = turnClient.relayAddress().toString()
-
-        if (useDtls) {
-            runDtlsRelay(
-                tag = tag, isFirst = isFirst, startMs = startMs,
-                turnClient = turnClient, relayAddr = relayAddr,
-                localSocket = localSocket,
-                firstReady = firstReady, onReady = onReady,
-                onStepChange = onStepChange,
-                onPacketToServer = onPacketToServer, onPacketFromServer = onPacketFromServer,
-                logger = logger,
-            )
-        } else {
-            runPlainRelay(
-                tag = tag, isFirst = isFirst, startMs = startMs,
-                turnClient = turnClient, relayAddr = relayAddr,
-                localSocket = localSocket,
-                firstReady = firstReady, onReady = onReady,
-                onPacketToServer = onPacketToServer, onPacketFromServer = onPacketFromServer,
-                logger = logger,
-            )
-        }
-    } catch (e: Exception) {
-        logger.info(tag, "Connection error: ${e.javaClass.simpleName}: ${e.message}")
-        firstReady?.completeExceptionally(e)
-    } finally {
-        turnClient.close()
-    }
-}
-
-// ── DTLS relay ─────────────────────────────────────────────────────────────
-
-private suspend fun runDtlsRelay(
-    tag: String,
-    isFirst: Boolean,
-    startMs: Long,
-    turnClient: TurnClient,
-    relayAddr: String,
-    localSocket: DatagramSocket,
-    firstReady: CompletableDeferred<String>?,
-    onReady: (String) -> Unit,
-    onStepChange: ((String) -> Unit)?,
-    onPacketToServer: () -> Unit,
-    onPacketFromServer: () -> Unit,
-    logger: ProxyLogger,
-) {
-    onStepChange?.invoke("DTLS Handshake")
-    val dtls = DtlsClient(logger = logger)
-    try {
-        val dtlsStart = System.currentTimeMillis()
-        if (isFirst) logger.info(tag, "DTLS handshake...")
-        try {
-            dtls.connectOverTurn(turnClient)
+        // Step 1: credentials
+        if (isFirst) trySend(TunnelEvent.StepChanged("Resolving DNS"))
+        val creds = try {
+            if (isFirst) logger.info(tag, "Getting TURN credentials...")
+            credentialProvider.getCredentials(params.link)
         } catch (e: Exception) {
-            logger.info(tag, "DTLS failed: ${e.javaClass.simpleName}: ${e.message}")
+            logger.info(tag, "Credentials failed: ${e.message}")
             firstReady?.completeExceptionally(e)
             return
         }
-        val dtlsMs = System.currentTimeMillis() - dtlsStart
-        if (isFirst) {
-            logger.info(tag, "DTLS OK in ${dtlsMs}ms · setup: ${System.currentTimeMillis() - startMs}ms total")
-        } else {
-            logger.info(tag, "Connected ✓ relay: $relayAddr · ${System.currentTimeMillis() - startMs}ms")
+
+        val turnAddr = buildTurnAddr(creds, params.turnHostOverride, params.turnPortOverride)
+        if (isFirst) logger.info(tag, "Credentials OK · TURN: $turnAddr · user: ${creds.username}")
+
+        // Step 2: TURN allocation
+        if (isFirst) trySend(TunnelEvent.StepChanged("Connecting TURN"))
+        val addrFamily = if (params.peerAddr.address.address.size == 4) RequestedAddressFamily.IPv4
+        else RequestedAddressFamily.IPv6
+
+        val turnClient = try {
+            if (isFirst) logger.info(tag, "Connecting to TURN (UDP)...")
+            TurnClient.create(turnAddr, creds, addrFamily, logger = logger)
+        } catch (e: Exception) {
+            logger.info(tag, "TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
+            firstReady?.completeExceptionally(e)
+            return
         }
 
+        try {
+            turnClient.allocate()
+            val relayStr = turnClient.relayAddress().toString()
+            if (isFirst) logger.info(
+                tag,
+                "TURN relay: $relayStr · channel → ${params.peerAddr.address.hostAddress}:${params.peerAddr.port}"
+            )
+            turnClient.channelBind(params.peerAddr.address.address, params.peerAddr.port)
+
+            val relayAddr = turnClient.relayAddress().toString()
+
+            if (params.useDtls) {
+                runDtlsRelay(
+                    tag = tag, isFirst = isFirst, startMs = startMs,
+                    turnClient = turnClient, relayAddr = relayAddr,
+                    localSocket = params.localSocket,
+                    firstReady = firstReady, onReady = onReady,
+                )
+            } else {
+                runPlainRelay(
+                    tag = tag, isFirst = isFirst, startMs = startMs,
+                    turnClient = turnClient, relayAddr = relayAddr,
+                    localSocket = params.localSocket,
+                    firstReady = firstReady, onReady = onReady,
+                )
+            }
+        } catch (e: Exception) {
+            logger.info(tag, "Connection error: ${e.javaClass.simpleName}: ${e.message}")
+            firstReady?.completeExceptionally(e)
+        } finally {
+            turnClient.close()
+        }
+    }
+
+    // ── DTLS relay ─────────────────────────────────────────────────────────
+
+    private suspend fun ProducerScope<TunnelEvent>.runDtlsRelay(
+        tag: String,
+        isFirst: Boolean,
+        startMs: Long,
+        turnClient: TurnClient,
+        relayAddr: String,
+        localSocket: DatagramSocket,
+        firstReady: CompletableDeferred<String>?,
+        onReady: (String) -> Unit,
+    ) {
+        if (isFirst) trySend(TunnelEvent.StepChanged("DTLS Handshake"))
+        val dtls = DtlsClient(logger = logger)
+        try {
+            // connectOverTurn is blocking — run it on the current thread
+            val dtlsStart = System.currentTimeMillis()
+            if (isFirst) logger.info(tag, "DTLS handshake...")
+            try {
+                dtls.connectOverTurn(turnClient)
+            } catch (e: Exception) {
+                logger.info(tag, "DTLS failed: ${e.javaClass.simpleName}: ${e.message}")
+                firstReady?.completeExceptionally(e)
+                return
+            }
+            val dtlsMs = System.currentTimeMillis() - dtlsStart
+            if (isFirst) {
+                logger.info(
+                    tag,
+                    "DTLS OK in ${dtlsMs}ms · setup: ${System.currentTimeMillis() - startMs}ms total"
+                )
+            } else {
+                logger.info(
+                    tag,
+                    "Connected ✓ relay: $relayAddr · ${System.currentTimeMillis() - startMs}ms"
+                )
+            }
+
+            firstReady?.complete(relayAddr)
+            onReady(relayAddr)
+
+            val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
+            val dtlsBuf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
+            val lastLocalAddr = AtomicReference<InetSocketAddress>()
+            var toServer = 0
+            var fromServer = 0
+
+            // Run relay + refresh; cancel refresh when relay loop finishes
+            coroutineScope {
+                val relayJob = launch {
+                    coroutineScope {
+                        launch {
+                            runCatching {
+                                while (true) {
+                                    val pkt = DatagramPacket(buf, buf.size)
+                                    localSocket.receive(pkt)
+                                    lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
+                                    toServer++
+                                    toServerPackets.incrementAndGet()
+                                    dtls.send(buf.copyOf(pkt.length))
+                                }
+                            }.onFailure {
+                                if (isFirst) logger.info(
+                                    tag,
+                                    "WG→TURN closed: ${it.javaClass.simpleName}"
+                                )
+                            }
+                        }
+                        launch {
+                            runCatching {
+                                while (true) {
+                                    val n = dtls.receive(dtlsBuf)
+                                    if (n < 0) break
+                                    if (n == 1 && dtlsBuf[0] == 0.toByte()) continue
+                                    fromServer++
+                                    fromServerPackets.incrementAndGet()
+                                    val addr = lastLocalAddr.get() ?: continue
+                                    localSocket.send(DatagramPacket(dtlsBuf, n, addr))
+                                }
+                            }.onFailure {
+                                if (isFirst) logger.info(
+                                    tag,
+                                    "TURN→WG closed: ${it.javaClass.simpleName}"
+                                )
+                            }
+                        }
+                    }
+                }
+                val refreshJob = launch { turnClient.runRefresh() }
+                relayJob.join()
+                refreshJob.cancel()
+            }
+
+            logger.info(
+                tag,
+                "Relay done · ↑$toServer ↓$fromServer pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}"
+            )
+        } finally {
+            dtls.close()
+        }
+    }
+
+    // ── Plain TURN relay (--no-dtls) ────────────────────────────────────────
+
+    private suspend fun runPlainRelay(
+        tag: String,
+        isFirst: Boolean,
+        startMs: Long,
+        turnClient: TurnClient,
+        relayAddr: String,
+        localSocket: DatagramSocket,
+        firstReady: CompletableDeferred<String>?,
+        onReady: (String) -> Unit,
+    ) {
         firstReady?.complete(relayAddr)
         onReady(relayAddr)
+        if (isFirst) logger.info(tag, "Relay active (no DTLS)")
 
         val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
-        val dtlsBuf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
-        var toServerPkts = 0
-        var fromServerPkts = 0
+        var toServer = 0
+        var fromServer = 0
 
+        // Run relay + refresh; cancel refresh when relay loop finishes
         coroutineScope {
-            launch {
-                runCatching {
-                    while (true) {
-                        val pkt = DatagramPacket(buf, buf.size)
-                        localSocket.receive(pkt)
-                        lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
-                        toServerPkts++
-                        onPacketToServer()
-                        dtls.send(buf.copyOf(pkt.length))
+            val relayJob = launch {
+                coroutineScope {
+                    launch {
+                        runCatching {
+                            while (true) {
+                                val pkt = DatagramPacket(buf, buf.size)
+                                localSocket.receive(pkt)
+                                lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
+                                toServer++
+                                toServerPackets.incrementAndGet()
+                                turnClient.send(buf.copyOf(pkt.length))
+                            }
+                        }.onFailure {
+                            if (isFirst) logger.info(
+                                tag,
+                                "WG→TURN closed: ${it.javaClass.simpleName}"
+                            )
+                        }
                     }
-                }.onFailure {
-                    if (isFirst) logger.info(tag, "WG→TURN closed: ${it.javaClass.simpleName}")
-                }
-            }
-
-            launch {
-                runCatching {
-                    while (true) {
-                        val n = dtls.receive(dtlsBuf)
-                        if (n < 0) break
-                        // Skip single-byte DTLS keepalive packets (0x00)
-                        if (n == 1 && dtlsBuf[0] == 0.toByte()) continue
-                        fromServerPkts++
-                        onPacketFromServer()
-                        val addr = lastLocalAddr.get() ?: continue
-                        localSocket.send(DatagramPacket(dtlsBuf, n, addr))
+                    launch {
+                        runCatching {
+                            while (true) {
+                                val data = turnClient.receive() ?: continue
+                                fromServer++
+                                fromServerPackets.incrementAndGet()
+                                val addr = lastLocalAddr.get() ?: continue
+                                localSocket.send(DatagramPacket(data, data.size, addr))
+                            }
+                        }.onFailure {
+                            if (isFirst) logger.info(
+                                tag,
+                                "TURN→WG closed: ${it.javaClass.simpleName}"
+                            )
+                        }
                     }
-                }.onFailure {
-                    if (isFirst) logger.info(tag, "TURN→WG closed: ${it.javaClass.simpleName}")
                 }
             }
+            val refreshJob = launch { turnClient.runRefresh() }
+            relayJob.join()
+            refreshJob.cancel()
         }
 
-        logger.info(tag, "Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
-    } finally {
-        dtls.close()
+        logger.info(
+            tag,
+            "Relay done · ↑$toServer ↓$fromServer pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}"
+        )
     }
-}
-
-// ── Plain TURN relay (--no-dtls) ───────────────────────────────────────────
-
-private suspend fun runPlainRelay(
-    tag: String,
-    isFirst: Boolean,
-    startMs: Long,
-    turnClient: TurnClient,
-    relayAddr: String,
-    localSocket: DatagramSocket,
-    firstReady: CompletableDeferred<String>?,
-    onReady: (String) -> Unit,
-    onPacketToServer: () -> Unit,
-    onPacketFromServer: () -> Unit,
-    logger: ProxyLogger,
-) {
-    firstReady?.complete(relayAddr)
-    onReady(relayAddr)
-    if (isFirst) logger.info(tag, "Relay active (no DTLS)")
-
-    val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
-    val lastLocalAddr = AtomicReference<InetSocketAddress>()
-    var toServerPkts = 0
-    var fromServerPkts = 0
-
-    coroutineScope {
-        launch {
-            runCatching {
-                while (true) {
-                    val pkt = DatagramPacket(buf, buf.size)
-                    localSocket.receive(pkt)
-                    lastLocalAddr.set(InetSocketAddress(pkt.address, pkt.port))
-                    toServerPkts++
-                    onPacketToServer()
-                    turnClient.send(buf.copyOf(pkt.length))
-                }
-            }.onFailure {
-                if (isFirst) logger.info(tag, "WG→TURN closed: ${it.javaClass.simpleName}")
-            }
-        }
-
-        launch {
-            runCatching {
-                while (true) {
-                    val data = turnClient.receive() ?: continue
-                    fromServerPkts++
-                    onPacketFromServer()
-                    val addr = lastLocalAddr.get() ?: continue
-                    localSocket.send(DatagramPacket(data, data.size, addr))
-                }
-            }.onFailure {
-                if (isFirst) logger.info(tag, "TURN→WG closed: ${it.javaClass.simpleName}")
-            }
-        }
-    }
-
-    logger.info(tag, "Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-package com.github.swerchansky.vkturnproxy.domain.model
+package com.github.swerchansky.vkturnproxy.domain
 
 data class ProxyStats(
     val toServerPkts: Long = 0,
