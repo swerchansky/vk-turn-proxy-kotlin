@@ -4,21 +4,22 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.swerchansky.vkturnproxy.config.TurnProxyConfig
 import com.github.swerchansky.vkturnproxy.dtls.DtlsServer
 import com.github.swerchansky.vkturnproxy.dtls.DtlsServerConnection
+import com.github.swerchansky.vkturnproxy.logging.JvmProxyLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.logging.Logger
 
-private val log: Logger = Logger.getLogger("server")
+private val log = JvmProxyLogger("server")
 private val connCounter = AtomicInteger(0)
 
 fun main(args: Array<String>) {
@@ -49,8 +50,8 @@ private class ServerCommand : CliktCommand(name = "server") {
         val listenAddr = parseAddr(listen)
         val connectAddr = parseAddr(connect)
 
-        val server = DtlsServer(listenAddr)
-        log.info("Listening on $listen · WireGuard → $connect")
+        val server = DtlsServer(listenAddr, logger = log)
+        log.info("server", "Listening on $listen · WireGuard → $connect")
 
         runBlocking(Dispatchers.IO) {
             try {
@@ -58,7 +59,7 @@ private class ServerCommand : CliktCommand(name = "server") {
                     val conn = try {
                         server.accept()
                     } catch (e: Exception) {
-                        log.warning("Accept error: ${e.message}")
+                        log.warn("server", "Accept error: ${e.message}")
                         continue
                     }
                     launch { handleConnection(conn, connectAddr) }
@@ -79,10 +80,10 @@ private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSoc
         it.connect(wgAddr)
         it.soTimeout = 30 * 60 * 1000
     }
-    log.info("$tag DTLS connection established · WG local port: ${wgSocket.localPort} → $wgAddr")
+    log.info(tag, "DTLS connection established · WG local port: ${wgSocket.localPort} → $wgAddr")
 
-    val buf = ByteArray(1600)
-    val wgBuf = ByteArray(1600)
+    val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
+    val wgBuf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
     var dtlsToWg = 0
     var wgToDtls = 0
 
@@ -98,7 +99,7 @@ private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSoc
                         wgSocket.send(DatagramPacket(buf, n, wgAddr))
                     }
                 } catch (e: Exception) {
-                    log.fine("$tag DTLS→WG ended: ${e.javaClass.simpleName}")
+                    log.debug(tag, "DTLS→WG ended: ${e.javaClass.simpleName}")
                 } finally {
                     wgSocket.close()
                 }
@@ -114,7 +115,7 @@ private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSoc
                         conn.send(wgBuf.copyOf(pkt.length))
                     }
                 } catch (e: Exception) {
-                    log.fine("$tag WG→DTLS ended: ${e.javaClass.simpleName}")
+                    log.debug(tag, "WG→DTLS ended: ${e.javaClass.simpleName}")
                 } finally {
                     conn.close()
                 }
@@ -126,7 +127,7 @@ private suspend fun handleConnection(conn: DtlsServerConnection, wgAddr: InetSoc
     }
 
     val dur = formatDuration(System.currentTimeMillis() - startMs)
-    log.info("$tag Connection closed · ↑$wgToDtls ↓$dtlsToWg pkts · up: $dur")
+    log.info(tag, "Connection closed · ↑$wgToDtls ↓$dtlsToWg pkts · up: $dur")
 }
 
 private fun parseAddr(addr: String): InetSocketAddress {

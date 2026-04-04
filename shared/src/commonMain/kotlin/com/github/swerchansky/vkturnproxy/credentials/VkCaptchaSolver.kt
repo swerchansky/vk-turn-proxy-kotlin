@@ -1,5 +1,8 @@
 package com.github.swerchansky.vkturnproxy.credentials
 
+import com.github.swerchansky.vkturnproxy.error.TurnProxyError
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -40,8 +43,12 @@ private const val STEP_DELAY_MS = 200L
  */
 class VkCaptchaSolver(
     private val client: HttpClient,
-    private val logger: (String) -> Unit = {},
+    private val logger: ProxyLogger = NoOpLogger,
 ) {
+
+    private companion object {
+        const val TAG = "VkCaptcha"
+    }
 
     /**
      * Returns success_token on success.
@@ -49,18 +56,18 @@ class VkCaptchaSolver(
      */
     suspend fun solve(error: VkCaptchaError): String {
         require(error.isNotRobotCaptcha) { "Not a solvable captcha error: $error" }
-        logger("[captcha] Solving Not Robot Captcha, sid=${error.captchaSid}")
+        logger.info(TAG, "Solving Not Robot Captcha, sid=${error.captchaSid}")
 
         val (powInput, difficulty) = fetchPowChallenge(error.redirectUri)
-        logger("[captcha] PoW challenge: difficulty=$difficulty")
+        logger.info(TAG, "PoW challenge: difficulty=$difficulty")
 
         val hash = solvePoW(powInput, difficulty)
-        logger("[captcha] PoW solved: ${hash.take(16)}...")
+        logger.info(TAG, "PoW solved: ${hash.take(16)}...")
 
         val autoToken = callCaptchaNotRobotApi(sessionToken = error.sessionToken, hash = hash)
-            ?: error("[captcha] captchaNotRobot returned non-OK status (slider captcha) — cannot solve automatically")
+            ?: throw TurnProxyError.CredentialFetchFailed("captchaNotRobot returned non-OK status (slider captcha) — cannot solve automatically")
 
-        logger("[captcha] Automatic solve succeeded")
+        logger.info(TAG, "Automatic solve succeeded")
         return autoToken
     }
 
@@ -75,7 +82,7 @@ class VkCaptchaSolver(
 
         val powInput = Regex("""const\s+powInput\s*=\s*"([^"]+)"""")
             .find(html)?.groupValues?.get(1)
-            ?: error("powInput not found in captcha HTML")
+            ?: throw TurnProxyError.CredentialFetchFailed("powInput not found in captcha HTML")
 
         val difficulty = Regex("""startsWith\('0'\.repeat\((\d+)\)\)""")
             .find(html)?.groupValues?.get(1)?.toIntOrNull() ?: 2
@@ -89,7 +96,7 @@ class VkCaptchaSolver(
             val hash = sha256Hex(powInput + nonce)
             if (hash.startsWith(target)) return hash
         }
-        error("PoW solve failed: no solution found within 10M iterations (difficulty=$difficulty)")
+        throw TurnProxyError.CredentialFetchFailed("PoW solve failed: no solution found within 10M iterations (difficulty=$difficulty)")
     }
 
     /** Returns success_token if status=OK, null if status=BOT or other non-OK. */
@@ -97,11 +104,11 @@ class VkCaptchaSolver(
         val baseParams = "session_token=${sessionToken.encodeURLParameter()}&domain=vk.com&adFp=&access_token="
         val browserFp = buildBrowserFp()
 
-        logger("[captcha] API 1/4: settings")
+        logger.info(TAG, "API 1/4: settings")
         vkApiPost("captchaNotRobot.settings", baseParams)
         delay(STEP_DELAY_MS)
 
-        logger("[captcha] API 2/4: componentDone")
+        logger.info(TAG, "API 2/4: componentDone")
         val deviceJson = """{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1032,"innerWidth":1920,"innerHeight":945,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":16,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"denied"}"""
         vkApiPost(
             "captchaNotRobot.componentDone",
@@ -109,7 +116,7 @@ class VkCaptchaSolver(
         )
         delay(STEP_DELAY_MS)
 
-        logger("[captcha] API 3/4: check")
+        logger.info(TAG, "API 3/4: check")
         val checkResp = vkApiPost("captchaNotRobot.check", buildCheckParams(baseParams, browserFp, hash))
         delay(STEP_DELAY_MS)
 
@@ -120,7 +127,7 @@ class VkCaptchaSolver(
         }
 
         val status = checkResp["response"]?.jsonObject?.get("status")?.jsonPrimitive?.content
-        logger("[captcha] check returned status=$status, switching to WebView fallback")
+        logger.info(TAG, "check returned status=$status, switching to WebView fallback")
         return null
     }
 
@@ -150,11 +157,11 @@ class VkCaptchaSolver(
     }
 
     private suspend fun endSession(baseParams: String) {
-        logger("[captcha] API 4/4: endSession")
+        logger.info(TAG, "API 4/4: endSession")
         try {
             vkApiPost("captchaNotRobot.endSession", baseParams)
         } catch (e: Exception) {
-            logger("[captcha] endSession failed (non-critical): ${e.message}")
+            logger.info(TAG, "endSession failed (non-critical): ${e.message}")
         }
     }
 

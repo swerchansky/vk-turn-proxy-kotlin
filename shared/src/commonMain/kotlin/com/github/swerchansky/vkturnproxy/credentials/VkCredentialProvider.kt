@@ -1,5 +1,8 @@
 package com.github.swerchansky.vkturnproxy.credentials
 
+import com.github.swerchansky.vkturnproxy.error.TurnProxyError
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import com.github.swerchansky.vkturnproxy.turn.TurnCredentials
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -78,13 +81,17 @@ private fun randomName(): String {
 class VkCredentialProvider(
     private val client: HttpClient,
     private val captchaSolver: VkCaptchaSolver,
-    private val logger: (String) -> Unit = {},
+    private val logger: ProxyLogger = NoOpLogger,
 ) : CredentialProvider {
+
+    private companion object {
+        const val TAG = "VkCredentials"
+    }
 
     override suspend fun getCredentials(link: String): TurnCredentials {
         val userAgent = randomUserAgent()
         val name = randomName()
-        logger("[identity] name=\"$name\" ua=\"${userAgent.take(40)}...\"")
+        logger.debug(TAG, "Identity: name=\"$name\" ua=\"${userAgent.take(40)}...\"")
 
         // Step 1: anonymous token
         val resp1 = doPost(
@@ -93,7 +100,7 @@ class VkCredentialProvider(
                     "&version=1&app_id=6287487",
             userAgent = userAgent,
         )
-        check(resp1["data"] != null) { "Step 1 failed, got: $resp1" }
+        if (resp1["data"] == null) throw TurnProxyError.CredentialFetchFailed("Step 1 (anon token) failed, got: $resp1")
         val token1 = resp1["data"]!!.jsonObject["access_token"]!!.jsonPrimitive.content
 
         // Step 2: calls token (with automatic captcha solving on error_code=14)
@@ -104,9 +111,9 @@ class VkCredentialProvider(
 
         val captchaError = resp2["error"]?.jsonObject?.let { VkCaptchaError.parse(it) }
         if (captchaError != null && captchaError.isNotRobotCaptcha) {
-            logger("[captcha] error_code=14 detected, solving...")
+            logger.info(TAG, "Captcha error_code=14 detected, solving...")
             val successToken = captchaSolver.solve(captchaError)
-            logger("[captcha] PoW succeeded, retrying with success_token")
+            logger.info(TAG, "PoW succeeded, retrying with success_token")
             val retryBody = "$step2Body" +
                 "&captcha_key=" +
                 "&captcha_sid=${captchaError.captchaSid}" +
@@ -115,9 +122,9 @@ class VkCredentialProvider(
                 "&captcha_ts=${captchaError.captchaTs}" +
                 "&captcha_attempt=${captchaError.captchaAttempt}"
             resp2 = doPost(url = step2Url, body = retryBody, userAgent = userAgent)
-            logger("[captcha] retry response error=${resp2["error"]}")
+            logger.debug(TAG, "Captcha retry response error=${resp2["error"]}")
         }
-        check(resp2["response"] != null) { "Step 2 failed, got: $resp2" }
+        if (resp2["response"] == null) throw TurnProxyError.CredentialFetchFailed("Step 2 (calls token) failed, got: $resp2")
         val token2 = resp2["response"]!!.jsonObject["token"]!!.jsonPrimitive.content
 
         // Step 3: OkCDN session
@@ -129,7 +136,7 @@ class VkCredentialProvider(
                     "&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA",
             userAgent = userAgent,
         )
-        check(resp3["session_key"] != null) { "Step 3 failed, got: $resp3" }
+        if (resp3["session_key"] == null) throw TurnProxyError.CredentialFetchFailed("Step 3 (OkCDN session) failed, got: $resp3")
         val token3 = resp3["session_key"]!!.jsonPrimitive.content
 
         // Step 4: join conference → TURN creds
@@ -140,7 +147,7 @@ class VkCredentialProvider(
                     "&application_key=CGMMEJLGDIHBABABA&session_key=$token3",
             userAgent = userAgent,
         )
-        check(resp4["turn_server"] != null) { "Step 4 failed, got: $resp4" }
+        if (resp4["turn_server"] == null) throw TurnProxyError.CredentialFetchFailed("Step 4 (join conference) failed, got: $resp4")
         val turnServer = resp4["turn_server"]!!.jsonObject
         val username = turnServer["username"]!!.jsonPrimitive.content
         val password = turnServer["credential"]!!.jsonPrimitive.content

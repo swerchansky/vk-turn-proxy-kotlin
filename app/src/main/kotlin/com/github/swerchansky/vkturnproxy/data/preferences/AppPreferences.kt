@@ -3,6 +3,7 @@ package com.github.swerchansky.vkturnproxy.data.preferences
 import android.content.Context
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.edit
+import com.github.swerchansky.vkturnproxy.config.TurnProxyConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -68,6 +69,6 @@ class AppPreferences @Inject constructor(context: Context) {
     }
 
     fun addToServerHistory(address: String) {
-        serverHistory = (listOf(address) + serverHistory.filter { it != address }).take(5)
+        serverHistory = (listOf(address) + serverHistory.filter { it != address }).take(TurnProxyConfig.MAX_SERVER_HISTORY)
     }
 }
