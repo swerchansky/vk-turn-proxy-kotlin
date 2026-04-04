@@ -37,7 +37,7 @@ class TurnClient private constructor(
 
     private val log = Logger.getLogger("turn-client")
     private var realm: String = ""
-    private var nonce: String = ""
+    @Volatile private var nonce: String = ""
     private var allocatedIp: ByteArray = ByteArray(4)
     private var allocatedPort: Int = 0
     private var boundChannel: Int = -1
@@ -229,10 +229,24 @@ class TurnClient private constructor(
             log.warning("TURN recv: unexpected channel 0x${ch.toString(16)} (bound=0x${boundChannel.toString(16)}), dropping")
             return null
         }
-        // Non-channel-data: could be STUN indication or keepalive
+        // Non-channel-data: could be STUN response to keepalive, indication, etc.
         val msg = StunMessage.decode(raw)
         if (msg != null) {
-            log.fine("TURN recv: non-ChannelData STUN msg method=0x${msg.method.toString(16)} cls=0x${msg.cls.toString(16)}, skipping")
+            val errCode = parseErrorCode(msg)
+            if (msg.cls == StunClass.ERROR && errCode == 438) {
+                // 438 Stale Nonce — server rotated the nonce; update and re-send keepalive immediately
+                // so the allocation doesn't expire before the next timer tick (5 min away).
+                val newNonce = msg.getAttr(StunAttr.NONCE)?.decodeToString()
+                if (!newNonce.isNullOrEmpty()) {
+                    log.fine("TURN recv: 438 Stale Nonce → updating nonce and retrying refresh")
+                    nonce = newNonce
+                    Thread({ refresh() }, "turn-nonce-refresh").also { it.isDaemon = true }.start()
+                } else {
+                    log.warning("TURN recv: 438 Stale Nonce but response has no NONCE attr")
+                }
+            } else {
+                log.fine("TURN recv: non-ChannelData STUN msg method=0x${msg.method.toString(16)} cls=0x${msg.cls.toString(16)}, skipping")
+            }
         } else {
             log.warning("TURN recv: unrecognised ${raw.size}B frame (hdr=${raw.take(4).joinToString("") { "%02x".format(it) }}), skipping")
         }
