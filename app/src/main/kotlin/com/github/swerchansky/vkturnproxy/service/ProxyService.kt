@@ -12,7 +12,6 @@ import androidx.core.app.NotificationCompat
 import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
-import com.github.swerchansky.vkturnproxy.credentials.YandexCredentialProvider
 import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.domain.model.ProxyStats
 import com.github.swerchansky.vkturnproxy.proxy.formatTurnProxyDuration
@@ -51,7 +50,6 @@ class ProxyService : Service() {
         const val EXTRA_LINK = "link"
         const val EXTRA_PEER = "peer"
         const val EXTRA_PORT = "port"
-        const val EXTRA_IS_VK = "is_vk"
         const val EXTRA_N = "n_connections"
 
         private const val NOTIFICATION_ID = 1
@@ -74,9 +72,7 @@ class ProxyService : Service() {
     }
 
     @Inject
-    lateinit var vkProvider: VkCredentialProvider
-    @Inject
-    lateinit var yandexProvider: YandexCredentialProvider
+    lateinit var credentialProvider: VkCredentialProvider
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var proxyJob: Job? = null
@@ -99,14 +95,13 @@ class ProxyService : Service() {
                 val link = intent.getStringExtra(EXTRA_LINK) ?: return START_NOT_STICKY
                 val peer = intent.getStringExtra(EXTRA_PEER) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 9000)
-                val isVk = intent.getBooleanExtra(EXTRA_IS_VK, true)
                 val n = intent.getIntExtra(EXTRA_N, 0)
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
                 proxyJob?.cancel()
                 toServerCounter.set(0)
                 fromServerCounter.set(0)
                 stats.value = ProxyStats()
-                proxyJob = scope.launch { runProxy(link, peer, port, isVk, n) }
+                proxyJob = scope.launch { runProxy(link, peer, port, n) }
             }
 
             ACTION_STOP -> stopProxy()
@@ -190,16 +185,13 @@ class ProxyService : Service() {
         rawLink: String,
         peerAddress: String,
         listenPort: Int,
-        isVk: Boolean,
         nConnections: Int,
     ) {
-        val provider = if (isVk) vkProvider else yandexProvider
-        val providerName = if (isVk) "VK" else "Yandex"
         val peerAddr = parseTurnProxyAddr(peerAddress)
         val n = if (nConnections > 0) nConnections else 16
         val sessionStartMs = System.currentTimeMillis()
 
-        appendLog("Provider: $providerName · $n connections · peer: $peerAddress · listen: 127.0.0.1:$listenPort")
+        appendLog("Provider: VK · $n connections · peer: $peerAddress · listen: 127.0.0.1:$listenPort")
         state.value = ProxyConnectionState.Connecting("Resolving DNS", 0, n)
         updateNotification("Connecting...")
 
@@ -242,9 +234,8 @@ class ProxyService : Service() {
                     link = rawLink,
                     peerAddr = peerAddr,
                     localSocket = socket,
-                    provider = provider,
+                    provider = credentialProvider,
                     nConnections = n,
-                    useUdp = true, // TODO: remove this option
                     logger = ::appendLog,
                     onStepChange = { step ->
                         state.value = ProxyConnectionState.Connecting(step, 0, n)

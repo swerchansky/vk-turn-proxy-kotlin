@@ -8,7 +8,6 @@ import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
-import com.github.swerchansky.vkturnproxy.credentials.YandexCredentialProvider
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
 import com.github.swerchansky.vkturnproxy.proxy.runProxyConnections
 import io.ktor.client.HttpClient
@@ -40,34 +39,30 @@ fun main(args: Array<String>) {
 private class ClientCommand : CliktCommand(name = "client") {
 
     val peer by option("--peer", help = "Server address (host:port)").required()
-    val vkLink by option("--vk-link", help = "VK call invite link (https://vk.com/call/join/...)")
-    val yandexLink by option("--yandex-link", help = "Yandex Telemost link (https://telemost.yandex.ru/j/...)")
+    val vkLink by option(
+        "--vk-link",
+        help = "VK call invite link (https://vk.com/call/join/...)"
+    ).required()
     val listen by option("--listen", help = "Local UDP address").default("127.0.0.1:9000")
-    val nConnections by option("--n", help = "Parallel TURN connections (default: 16 VK / 1 Yandex)").int().default(0)
+    val nConnections by option("--n", help = "Parallel TURN connections (default: 16)").int()
+        .default(16)
     val turnHost by option("--turn", help = "Override TURN server IP")
     val turnPort by option("--port", help = "Override TURN server port")
-    val useUdp by option("--udp", help = "Use UDP for TURN (default: TCP)").flag()
-    val noDtls by option("--no-dtls", help = "Disable DTLS obfuscation (DO NOT USE in production)").flag()
+    val noDtls by option(
+        "--no-dtls",
+        help = "Disable DTLS obfuscation (DO NOT USE in production)"
+    ).flag()
 
     override fun run() {
-        require((vkLink == null) != (yandexLink == null)) {
-            "Exactly one of --vk-link or --yandex-link is required"
-        }
-
         val peerAddr = parseTurnProxyAddr(peer)
         val listenAddr = parseTurnProxyAddr(listen)
-        val isVk = vkLink != null
-        val providerName = if (isVk) "VK" else "Yandex"
-        val transport = if (useUdp) "UDP" else "TCP"
-        val mode = if (noDtls) "plain" else "DTLS/$transport"
+        val mode = if (noDtls) "plain" else "DTLS/UDP"
 
-        val rawLink = (if (isVk) vkLink!! else yandexLink!!)
-            .let { if (isVk) it.split("join/").last() else it.split("j/").last() }
+        val rawLink = vkLink
+            .split("join/").last()
             .substringBefore("?").substringBefore("/").substringBefore("#")
 
-        val n = if (nConnections > 0) nConnections else if (isVk) 16 else 1
-
-        log.info("Provider: $providerName · $n connections ($mode) · listen: $listen → peer: $peer")
+        log.info("Provider: VK · $nConnections connections ($mode) · listen: $listen → peer: $peer")
 
         val httpClient = HttpClient(CIO) {
             install(WebSockets)
@@ -75,10 +70,11 @@ private class ClientCommand : CliktCommand(name = "client") {
             engine { requestTimeout = 20_000 }
         }
 
-        val provider = if (isVk)
-            VkCredentialProvider(httpClient, VkCaptchaSolver(httpClient, logger = { log.info(it) }), logger = { log.info(it) })
-        else
-            YandexCredentialProvider(httpClient)
+        val provider = VkCredentialProvider(
+            httpClient,
+            VkCaptchaSolver(httpClient, logger = { log.info(it) }),
+            logger = { log.info(it) },
+        )
 
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         Runtime.getRuntime().addShutdownHook(Thread {
@@ -94,8 +90,7 @@ private class ClientCommand : CliktCommand(name = "client") {
                 peerAddr = peerAddr,
                 localSocket = localSocket,
                 provider = provider,
-                nConnections = n,
-                useUdp = useUdp,
+                nConnections = nConnections,
                 useDtls = !noDtls,
                 turnHostOverride = turnHost,
                 turnPortOverride = turnPort,

@@ -19,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
  *
  * Usage:
  * ```
- * val client = TurnClient.connect(serverAddr, creds, useUdp = false)
+ * val client = TurnClient.connect(serverAddr, creds)
  * client.allocate()
  * val relay = client.relayAddress()
  * client.channelBind(peerIp, peerPort)
@@ -51,16 +51,10 @@ class TurnClient private constructor(
         fun connect(
             serverAddr: InetSocketAddress,
             credentials: TurnCredentials,
-            useUdp: Boolean,
             addressFamily: RequestedAddressFamily = RequestedAddressFamily.IPv4,
-            connectTimeoutMs: Int = 5_000,
             logger: (String) -> Unit = {},
         ): TurnClient {
-            val transport = if (useUdp) {
-                UdpTurnTransport(serverAddr)
-            } else {
-                TcpTurnTransport(serverAddr, connectTimeoutMs)
-            }
+            val transport = UdpTurnTransport(serverAddr)
             return TurnClient(transport, credentials, addressFamily, logger)
         }
     }

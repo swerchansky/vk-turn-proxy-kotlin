@@ -41,7 +41,6 @@ fun formatTurnProxyDuration(ms: Long): String {
  * @param localSocket        Local UDP socket to forward traffic to/from.
  * @param provider           Credential provider (VK or Yandex).
  * @param nConnections       Total number of parallel connections.
- * @param useUdp             Use UDP for the TURN transport (default: TCP).
  * @param useDtls            Wrap data in DTLS (default: true).
  * @param turnHostOverride   Override the TURN host extracted from credentials.
  * @param turnPortOverride   Override the TURN port extracted from credentials.
@@ -60,7 +59,6 @@ suspend fun runProxyConnections(
     localSocket: DatagramSocket,
     provider: CredentialProvider,
     nConnections: Int,
-    useUdp: Boolean = false,
     useDtls: Boolean = true,
     turnHostOverride: String? = null,
     turnPortOverride: String? = null,
@@ -81,7 +79,7 @@ suspend fun runProxyConnections(
                 connIndex = 1, connTotal = nConnections,
                 link = link, provider = provider,
                 peerAddr = peerAddr, localSocket = localSocket,
-                useUdp = useUdp, useDtls = useDtls,
+                useDtls = useDtls,
                 turnHostOverride = turnHostOverride, turnPortOverride = turnPortOverride,
                 firstReady = firstReady,
                 onStepChange = onStepChange,
@@ -106,7 +104,7 @@ suspend fun runProxyConnections(
                     connIndex = idx + 2, connTotal = nConnections,
                     link = link, provider = provider,
                     peerAddr = peerAddr, localSocket = localSocket,
-                    useUdp = useUdp, useDtls = useDtls,
+                    useDtls = useDtls,
                     turnHostOverride = turnHostOverride, turnPortOverride = turnPortOverride,
                     firstReady = null,
                     onStepChange = null,
@@ -143,7 +141,6 @@ suspend fun runSingleTurnConnection(
     provider: CredentialProvider,
     peerAddr: InetSocketAddress,
     localSocket: DatagramSocket,
-    useUdp: Boolean = false,
     useDtls: Boolean = true,
     turnHostOverride: String? = null,
     turnPortOverride: String? = null,
@@ -178,8 +175,8 @@ suspend fun runSingleTurnConnection(
                      else RequestedAddressFamily.IPv6
 
     val turnClient = try {
-        if (isFirst) logger("$tag Connecting to TURN (${if (useUdp) "UDP" else "TCP"})...")
-        TurnClient.connect(turnAddr, creds, useUdp, addrFamily, logger = { logger("$tag $it") })
+        if (isFirst) logger("$tag Connecting to TURN (UDP)...")
+        TurnClient.connect(turnAddr, creds, addrFamily, logger = { logger("$tag $it") })
     } catch (e: Exception) {
         logger("$tag TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
         firstReady?.completeExceptionally(e)
