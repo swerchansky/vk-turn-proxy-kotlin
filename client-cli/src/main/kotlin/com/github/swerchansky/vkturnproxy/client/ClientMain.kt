@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
+import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.credentials.YandexCredentialProvider
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
@@ -74,7 +75,10 @@ private class ClientCommand : CliktCommand(name = "client") {
             engine { requestTimeout = 20_000 }
         }
 
-        val provider = if (isVk) VkCredentialProvider(httpClient) else YandexCredentialProvider(httpClient)
+        val provider = if (isVk)
+            VkCredentialProvider(httpClient, VkCaptchaSolver(httpClient, logger = { log.info(it) }), logger = { log.info(it) })
+        else
+            YandexCredentialProvider(httpClient)
 
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         Runtime.getRuntime().addShutdownHook(Thread {

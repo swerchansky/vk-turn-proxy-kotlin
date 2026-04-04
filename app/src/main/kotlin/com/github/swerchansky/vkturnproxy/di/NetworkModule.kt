@@ -1,5 +1,6 @@
 package com.github.swerchansky.vkturnproxy.di
 
+import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.credentials.YandexCredentialProvider
 import dagger.Module
@@ -22,8 +23,16 @@ class NetworkModule {
     }
 
     @Provides @Singleton
-    fun provideVkCredentialProvider(client: HttpClient): VkCredentialProvider =
-        VkCredentialProvider(client)
+    fun provideVkCaptchaSolver(client: HttpClient): VkCaptchaSolver =
+        VkCaptchaSolver(client, logger = { android.util.Log.d("VkCaptcha", it) })
+
+    @Provides @Singleton
+    fun provideVkCredentialProvider(client: HttpClient, captchaSolver: VkCaptchaSolver): VkCredentialProvider =
+        VkCredentialProvider(
+            client = client,
+            captchaSolver = captchaSolver,
+            logger = { android.util.Log.d("VkCaptcha", it) },
+        )
 
     @Provides @Singleton
     fun provideYandexCredentialProvider(client: HttpClient): YandexCredentialProvider =

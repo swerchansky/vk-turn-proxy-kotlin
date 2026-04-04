@@ -10,39 +10,113 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.jsonArray
+import kotlin.random.Random
 
-private const val USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0"
+private val USER_AGENTS = listOf(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 YaBrowser/24.1.0.0 Yowser/2.5 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 YaBrowser/24.1.2.0 Yowser/2.5 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 OPR/112.0.0.0",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 OPR/111.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+)
+
+private val FIRST_NAMES = listOf(
+    "Александр", "Дмитрий", "Максим", "Сергей", "Андрей", "Алексей", "Артём", "Илья",
+    "Кирилл", "Михаил", "Никита", "Матвей", "Роман", "Егор", "Арсений", "Иван",
+    "Денис", "Даниил", "Тимофей", "Владислав", "Игорь", "Павел", "Руслан", "Марк",
+    "Анна", "Мария", "Елена", "Дарья", "Анастасия", "Екатерина", "Виктория", "Ольга",
+    "Наталья", "Юлия", "Татьяна", "Светлана", "Ирина", "Ксения", "Алина", "Елизавета",
+)
+
+private val LAST_NAMES = listOf(
+    "Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", "Петров", "Соколов", "Михайлов",
+    "Новиков", "Федоров", "Морозов", "Волков", "Алексеев", "Лебедев", "Семенов", "Егоров",
+    "Павлов", "Козлов", "Степанов", "Николаев", "Орлов", "Андреев", "Макаров", "Никитин",
+    "Захаров", "Зайцев", "Соловьев", "Борисов", "Яковлев", "Григорьев", "Романов", "Воробьев",
+)
+
+private fun randomUserAgent() = USER_AGENTS[Random.nextInt(USER_AGENTS.size)]
+
+private fun randomName(): String {
+    val first = FIRST_NAMES[Random.nextInt(FIRST_NAMES.size)]
+    if (Random.nextFloat() < 0.3f) return first
+    val last = LAST_NAMES[Random.nextInt(LAST_NAMES.size)]
+    val lastTwo = first.takeLast(2)
+    return if (lastTwo == "ая" || lastTwo == "ья" || first.last() == 'а' || first.last() == 'я')
+        "$first ${last}а"
+    else
+        "$first $last"
+}
 
 /**
  * Extracts TURN credentials from a VK call invite link.
  *
  * Flow (4 POST requests):
  *  1. login.vk.ru    → anonymous token1
- *  2. api.vk.ru      → calls token2
+ *  2. api.vk.ru      → calls token2  (with automatic Not Robot captcha solving on error_code=14)
  *  3. calls.okcdn.ru → session token3 (auth.anonymLogin)
  *  4. calls.okcdn.ru → TURN creds (vchat.joinConversationByLink)
  */
-class VkCredentialProvider(private val client: HttpClient) : CredentialProvider {
+class VkCredentialProvider(
+    private val client: HttpClient,
+    private val captchaSolver: VkCaptchaSolver,
+    private val logger: (String) -> Unit = {},
+) : CredentialProvider {
 
     override suspend fun getCredentials(link: String): TurnCredentials {
+        val userAgent = randomUserAgent()
+        val name = randomName()
+        logger("[identity] name=\"$name\" ua=\"${userAgent.take(40)}...\"")
+
         // Step 1: anonymous token
         val resp1 = doPost(
             url = "https://login.vk.ru/?act=get_anonym_token",
             body = "client_id=6287487&token_type=messages&client_secret=QbYic1K3lEV5kTGiqlq2" +
                     "&version=1&app_id=6287487",
+            userAgent = userAgent,
         )
         check(resp1["data"] != null) { "Step 1 failed, got: $resp1" }
         val token1 = resp1["data"]!!.jsonObject["access_token"]!!.jsonPrimitive.content
 
-        // Step 2: calls token
-        val resp2 = doPost(
-            url = "https://api.vk.ru/method/calls.getAnonymousToken?v=5.274&client_id=6287487",
-            body = "vk_join_link=https://vk.com/call/join/$link&name=123&access_token=$token1",
-        )
+        // Step 2: calls token (with automatic captcha solving on error_code=14)
+        val step2Url = "https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=6287487"
+        val encodedName = name.encodeVkParam()
+        val step2Body = "vk_join_link=https://vk.ru/call/join/$link&name=$encodedName&access_token=$token1"
+        var resp2 = doPost(url = step2Url, body = step2Body, userAgent = userAgent)
+
+        val captchaError = resp2["error"]?.jsonObject?.let { VkCaptchaError.parse(it) }
+        if (captchaError != null && captchaError.isNotRobotCaptcha) {
+            logger("[captcha] error_code=14 detected, solving...")
+            val successToken = captchaSolver.solve(captchaError)
+            logger("[captcha] PoW succeeded, retrying with success_token")
+            val retryBody = "$step2Body" +
+                "&captcha_key=" +
+                "&captcha_sid=${captchaError.captchaSid}" +
+                "&is_sound_captcha=0" +
+                "&success_token=$successToken" +
+                "&captcha_ts=${captchaError.captchaTs}" +
+                "&captcha_attempt=${captchaError.captchaAttempt}"
+            resp2 = doPost(url = step2Url, body = retryBody, userAgent = userAgent)
+            logger("[captcha] retry response error=${resp2["error"]}")
+        }
         check(resp2["response"] != null) { "Step 2 failed, got: $resp2" }
         val token2 = resp2["response"]!!.jsonObject["token"]!!.jsonPrimitive.content
 
@@ -53,6 +127,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
             body = "session_data=%7B%22version%22%3A2%2C%22device_id%22%3A%22$deviceId" +
                     "%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D" +
                     "&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA",
+            userAgent = userAgent,
         )
         check(resp3["session_key"] != null) { "Step 3 failed, got: $resp3" }
         val token3 = resp3["session_key"]!!.jsonPrimitive.content
@@ -63,6 +138,7 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
             body = "joinLink=$link&isVideo=false&protocolVersion=5&anonymToken=$token2" +
                     "&method=vchat.joinConversationByLink&format=JSON" +
                     "&application_key=CGMMEJLGDIHBABABA&session_key=$token3",
+            userAgent = userAgent,
         )
         check(resp4["turn_server"] != null) { "Step 4 failed, got: $resp4" }
         val turnServer = resp4["turn_server"]!!.jsonObject
@@ -78,15 +154,29 @@ class VkCredentialProvider(private val client: HttpClient) : CredentialProvider 
         return TurnCredentials(username, password, address)
     }
 
-    private suspend fun doPost(url: String, body: String): JsonObject {
+    private suspend fun doPost(url: String, body: String, userAgent: String): JsonObject {
         val response: String = client.post(url) {
             headers {
-                append("User-Agent", USER_AGENT)
+                append("User-Agent", userAgent)
             }
             contentType(ContentType.Application.FormUrlEncoded)
             setBody(body)
         }.body()
         return Json.parseToJsonElement(response).jsonObject
+    }
+}
+
+/** Percent-encodes a string for use in application/x-www-form-urlencoded bodies. */
+private fun String.encodeVkParam(): String = buildString {
+    for (ch in this@encodeVkParam) {
+        when {
+            ch.isLetterOrDigit() || ch in "-._~" -> append(ch)
+            else -> ch.toString().encodeToByteArray().forEach { b ->
+                append('%')
+                append("0123456789ABCDEF"[(b.toInt() shr 4) and 0xF])
+                append("0123456789ABCDEF"[b.toInt() and 0xF])
+            }
+        }
     }
 }
 
