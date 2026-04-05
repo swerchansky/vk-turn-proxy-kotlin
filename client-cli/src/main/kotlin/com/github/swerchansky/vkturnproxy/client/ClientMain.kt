@@ -8,6 +8,7 @@ import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.swerchansky.vkturnproxy.credentials.VkCaptchaSolver
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
+import com.github.swerchansky.vkturnproxy.logging.JvmProxyLogger
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
 import com.github.swerchansky.vkturnproxy.proxy.runProxyConnections
 import io.ktor.client.HttpClient
@@ -20,12 +21,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import java.net.DatagramSocket
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import java.net.DatagramSocket
 import java.security.Security
-import java.util.logging.Logger
 
-private val log: Logger = Logger.getLogger("client")
+private val log = JvmProxyLogger("client")
 
 fun main(args: Array<String>) {
     val logConfig = object {}.javaClass.classLoader?.getResourceAsStream("logging.properties")
@@ -62,7 +62,7 @@ private class ClientCommand : CliktCommand(name = "client") {
             .split("join/").last()
             .substringBefore("?").substringBefore("/").substringBefore("#")
 
-        log.info("Provider: VK · $nConnections connections ($mode) · listen: $listen → peer: $peer")
+        log.info("client", "Provider: VK · $nConnections connections ($mode) · listen: $listen → peer: $peer")
 
         val httpClient = HttpClient(CIO) {
             install(WebSockets)
@@ -72,13 +72,13 @@ private class ClientCommand : CliktCommand(name = "client") {
 
         val provider = VkCredentialProvider(
             httpClient,
-            VkCaptchaSolver(httpClient, logger = { log.info(it) }),
-            logger = { log.info(it) },
+            VkCaptchaSolver(httpClient, logger = log),
+            logger = log,
         )
 
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         Runtime.getRuntime().addShutdownHook(Thread {
-            log.info("Shutting down...")
+            log.info("client", "Shutting down...")
             scope.cancel()
             httpClient.close()
         })
@@ -94,13 +94,13 @@ private class ClientCommand : CliktCommand(name = "client") {
                 useDtls = !noDtls,
                 turnHostOverride = turnHost,
                 turnPortOverride = turnPort,
-                logger = { log.info(it) },
+                logger = log,
                 onFirstReady = { relayAddr ->
-                    log.info("Tunnel ready · relay: $relayAddr · listening on $listen")
+                    log.info("client", "Tunnel ready · relay: $relayAddr · listening on $listen")
                 },
                 onConnectionReady = { c, total, _ ->
-                    if (c < total) log.info("Establishing connections $c/$total...")
-                    else log.info("All $total/$total connections established")
+                    if (c < total) log.info("client", "Establishing connections $c/$total...")
+                    else log.info("client", "All $total/$total connections established")
                 },
             )
         }

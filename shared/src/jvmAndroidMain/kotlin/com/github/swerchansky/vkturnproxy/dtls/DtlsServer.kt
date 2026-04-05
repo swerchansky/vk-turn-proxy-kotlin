@@ -1,19 +1,14 @@
 package com.github.swerchansky.vkturnproxy.dtls
 
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import org.bouncycastle.tls.CipherSuite
 import org.bouncycastle.tls.DTLSServerProtocol
-import org.bouncycastle.tls.ProtocolVersion
 import org.bouncycastle.tls.DTLSTransport
 import org.bouncycastle.tls.DatagramTransport
 import org.bouncycastle.tls.DefaultTlsServer
-import org.bouncycastle.tls.HashAlgorithm
-import org.bouncycastle.tls.SignatureAlgorithm
-import org.bouncycastle.tls.SignatureAndHashAlgorithm
+import org.bouncycastle.tls.ProtocolVersion
 import org.bouncycastle.tls.TlsCredentialedSigner
-import org.bouncycastle.tls.crypto.TlsCertificate
-import org.bouncycastle.tls.crypto.TlsCryptoParameters
-import org.bouncycastle.tls.crypto.impl.bc.BcDefaultTlsCredentialedSigner
-import org.bouncycastle.tls.crypto.impl.bc.BcTlsCertificate
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto
 import java.io.Closeable
 import java.net.DatagramPacket
@@ -24,7 +19,6 @@ import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
-import java.util.logging.Logger
 
 /**
  * DTLS 1.2 server using BouncyCastle bctls.
@@ -37,13 +31,17 @@ import java.util.logging.Logger
 class DtlsServer(
     listenAddr: InetSocketAddress,
     private val readTimeoutMs: Int = 30 * 60 * 1000,
+    private val logger: ProxyLogger = NoOpLogger,
 ) : Closeable {
+
+    private companion object {
+        const val TAG = "DtlsServer"
+    }
 
     private val socket = DatagramSocket(listenAddr)
     private val crypto = BcTlsCrypto(SecureRandom())
     private val protocol = DTLSServerProtocol()
     private val cred = SelfSignedEcdsaCred(crypto)
-    private val log = Logger.getLogger("dtls-server")
 
     // Per-client packet queues
     private val connQueues = ConcurrentHashMap<InetSocketAddress, LinkedBlockingQueue<ByteArray>>()
@@ -68,10 +66,10 @@ class DtlsServer(
                     LinkedBlockingQueue()
                 }.offer(data)
             } catch (_: SocketException) {
-                if (!socket.isClosed) log.warning("DtlsServer demux: socket error")
+                if (!socket.isClosed) logger.warn(TAG, "Demux socket error")
                 break
             } catch (e: Exception) {
-                if (!socket.isClosed) log.warning("DtlsServer demux: ${e.message}")
+                if (!socket.isClosed) logger.warn(TAG, "Demux error: ${e.message}")
             }
         }
     }
@@ -83,7 +81,7 @@ class DtlsServer(
     fun accept(): DtlsServerConnection {
         val clientAddr = newClients.take()
         val queue = connQueues[clientAddr]!!
-        log.info("DTLS: new client $clientAddr — starting handshake")
+        logger.info(TAG, "New client $clientAddr — starting handshake")
 
         val transport = object : DatagramTransport {
             override fun getSendLimit() = 1400
@@ -98,25 +96,25 @@ class DtlsServer(
                     ?: return -1
                 val copyLen = minOf(len, packet.size)
                 if (packet.size > len) {
-                    log.warning("DTLS-server: packet from $clientAddr ${packet.size}B > buf ${len}B, truncating!")
+                    logger.warn(TAG, "Packet from $clientAddr ${packet.size}B > buf ${len}B, truncating!")
                 }
                 packet.copyInto(data, off, 0, copyLen)
                 return copyLen
             }
 
             override fun close() {
-                log.fine("DTLS-server: transport closed for $clientAddr")
+                logger.debug(TAG, "Transport closed for $clientAddr")
                 connQueues.remove(clientAddr)
             }
         }
 
         return try {
             val dtls = protocol.accept(GoodTurnTlsServer(crypto, cred), transport)
-            log.info("DTLS: handshake OK with $clientAddr")
+            logger.info(TAG, "Handshake OK with $clientAddr")
             DtlsServerConnection(dtls, readTimeoutMs) { connQueues.remove(clientAddr) }
         } catch (e: Exception) {
             connQueues.remove(clientAddr)
-            log.warning("DTLS: handshake failed with $clientAddr — ${e::class.simpleName}: ${e.message}")
+            logger.warn(TAG, "Handshake failed with $clientAddr — ${e::class.simpleName}: ${e.message}")
             throw e
         }
     }

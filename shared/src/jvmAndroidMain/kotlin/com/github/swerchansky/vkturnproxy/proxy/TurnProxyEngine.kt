@@ -1,7 +1,10 @@
 package com.github.swerchansky.vkturnproxy.proxy
 
+import com.github.swerchansky.vkturnproxy.config.TurnProxyConfig
 import com.github.swerchansky.vkturnproxy.credentials.CredentialProvider
 import com.github.swerchansky.vkturnproxy.dtls.DtlsClient
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import com.github.swerchansky.vkturnproxy.turn.RequestedAddressFamily
 import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import com.github.swerchansky.vkturnproxy.turn.TurnCredentials
@@ -62,7 +65,7 @@ suspend fun runProxyConnections(
     useDtls: Boolean = true,
     turnHostOverride: String? = null,
     turnPortOverride: String? = null,
-    logger: (String) -> Unit = {},
+    logger: ProxyLogger = NoOpLogger,
     onStepChange: ((String) -> Unit)? = null,
     onFirstReady: (relayAddr: String) -> Unit = {},
     onConnectionReady: (connectedCount: Int, total: Int, relayAddr: String) -> Unit = { _, _, _ -> },
@@ -96,9 +99,9 @@ suspend fun runProxyConnections(
         val relayAddr = firstReady.await()
         onFirstReady(relayAddr)
 
-        // Remaining N-1 connections, staggered 200 ms apart
+        // Remaining N-1 connections, staggered apart
         repeat(nConnections - 1) { idx ->
-            delay(200)
+            delay(TurnProxyConfig.STAGGERED_CONNECTION_DELAY_MS)
             launch {
                 runSingleTurnConnection(
                     connIndex = idx + 2, connTotal = nConnections,
@@ -149,7 +152,7 @@ suspend fun runSingleTurnConnection(
     onReady: (String) -> Unit = {},
     onPacketToServer: () -> Unit = {},
     onPacketFromServer: () -> Unit = {},
-    logger: (String) -> Unit = {},
+    logger: ProxyLogger = NoOpLogger,
 ) {
     val isFirst = firstReady != null
     val tag = "[$connIndex/$connTotal]"
@@ -158,16 +161,16 @@ suspend fun runSingleTurnConnection(
     // ── Step 1: credentials ────────────────────────────────────────────────
     onStepChange?.invoke("Resolving DNS")
     val creds = try {
-        if (isFirst) logger("$tag Getting TURN credentials...")
+        if (isFirst) logger.info(tag, "Getting TURN credentials...")
         provider.getCredentials(link)
     } catch (e: Exception) {
-        logger("$tag Credentials failed: ${e.message}")
+        logger.info(tag, "Credentials failed: ${e.message}")
         firstReady?.completeExceptionally(e)
         return
     }
 
     val turnAddr = buildTurnAddr(creds, turnHostOverride, turnPortOverride)
-    if (isFirst) logger("$tag Credentials OK · TURN: $turnAddr · user: ${creds.username}")
+    if (isFirst) logger.info(tag, "Credentials OK · TURN: $turnAddr · user: ${creds.username}")
 
     // ── Step 2: TURN allocation ────────────────────────────────────────────
     onStepChange?.invoke("Connecting TURN")
@@ -175,10 +178,10 @@ suspend fun runSingleTurnConnection(
                      else RequestedAddressFamily.IPv6
 
     val turnClient = try {
-        if (isFirst) logger("$tag Connecting to TURN (UDP)...")
-        TurnClient.connect(turnAddr, creds, addrFamily, logger = { logger("$tag $it") })
+        if (isFirst) logger.info(tag, "Connecting to TURN (UDP)...")
+        TurnClient.connect(turnAddr, creds, addrFamily, logger = logger)
     } catch (e: Exception) {
-        logger("$tag TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
+        logger.info(tag, "TURN connect failed: ${e.javaClass.simpleName}: ${e.message}")
         firstReady?.completeExceptionally(e)
         return
     }
@@ -186,7 +189,7 @@ suspend fun runSingleTurnConnection(
     try {
         turnClient.allocate()
         val relayStr = turnClient.relayAddress().toString()
-        if (isFirst) logger("$tag TURN relay: $relayStr · channel → ${peerAddr.address.hostAddress}:${peerAddr.port}")
+        if (isFirst) logger.info(tag, "TURN relay: $relayStr · channel → ${peerAddr.address.hostAddress}:${peerAddr.port}")
         turnClient.channelBind(peerAddr.address.address, peerAddr.port)
 
         val relayAddr = turnClient.relayAddress().toString()
@@ -212,7 +215,7 @@ suspend fun runSingleTurnConnection(
             )
         }
     } catch (e: Exception) {
-        logger("$tag Connection error: ${e.javaClass.simpleName}: ${e.message}")
+        logger.info(tag, "Connection error: ${e.javaClass.simpleName}: ${e.message}")
         firstReady?.completeExceptionally(e)
     } finally {
         turnClient.close()
@@ -233,32 +236,32 @@ private suspend fun runDtlsRelay(
     onStepChange: ((String) -> Unit)?,
     onPacketToServer: () -> Unit,
     onPacketFromServer: () -> Unit,
-    logger: (String) -> Unit,
+    logger: ProxyLogger,
 ) {
     onStepChange?.invoke("DTLS Handshake")
-    val dtls = DtlsClient()
+    val dtls = DtlsClient(logger = logger)
     try {
         val dtlsStart = System.currentTimeMillis()
-        if (isFirst) logger("$tag DTLS handshake...")
+        if (isFirst) logger.info(tag, "DTLS handshake...")
         try {
             dtls.connectOverTurn(turnClient)
         } catch (e: Exception) {
-            logger("$tag DTLS failed: ${e.javaClass.simpleName}: ${e.message}")
+            logger.info(tag, "DTLS failed: ${e.javaClass.simpleName}: ${e.message}")
             firstReady?.completeExceptionally(e)
             return
         }
         val dtlsMs = System.currentTimeMillis() - dtlsStart
         if (isFirst) {
-            logger("$tag DTLS OK in ${dtlsMs}ms · setup: ${System.currentTimeMillis() - startMs}ms total")
+            logger.info(tag, "DTLS OK in ${dtlsMs}ms · setup: ${System.currentTimeMillis() - startMs}ms total")
         } else {
-            logger("$tag Connected ✓ relay: $relayAddr · ${System.currentTimeMillis() - startMs}ms")
+            logger.info(tag, "Connected ✓ relay: $relayAddr · ${System.currentTimeMillis() - startMs}ms")
         }
 
         firstReady?.complete(relayAddr)
         onReady(relayAddr)
 
-        val buf = ByteArray(1600)
-        val dtlsBuf = ByteArray(1600)
+        val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
+        val dtlsBuf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
         val lastLocalAddr = AtomicReference<InetSocketAddress>()
         var toServerPkts = 0
         var fromServerPkts = 0
@@ -275,7 +278,7 @@ private suspend fun runDtlsRelay(
                         dtls.send(buf.copyOf(pkt.length))
                     }
                 }.onFailure {
-                    if (isFirst) logger("$tag WG→TURN closed: ${it.javaClass.simpleName}")
+                    if (isFirst) logger.info(tag, "WG→TURN closed: ${it.javaClass.simpleName}")
                 }
             }
 
@@ -292,12 +295,12 @@ private suspend fun runDtlsRelay(
                         localSocket.send(DatagramPacket(dtlsBuf, n, addr))
                     }
                 }.onFailure {
-                    if (isFirst) logger("$tag TURN→WG closed: ${it.javaClass.simpleName}")
+                    if (isFirst) logger.info(tag, "TURN→WG closed: ${it.javaClass.simpleName}")
                 }
             }
         }
 
-        logger("$tag Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
+        logger.info(tag, "Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
     } finally {
         dtls.close()
     }
@@ -316,13 +319,13 @@ private suspend fun runPlainRelay(
     onReady: (String) -> Unit,
     onPacketToServer: () -> Unit,
     onPacketFromServer: () -> Unit,
-    logger: (String) -> Unit,
+    logger: ProxyLogger,
 ) {
     firstReady?.complete(relayAddr)
     onReady(relayAddr)
-    if (isFirst) logger("$tag Relay active (no DTLS)")
+    if (isFirst) logger.info(tag, "Relay active (no DTLS)")
 
-    val buf = ByteArray(1600)
+    val buf = ByteArray(TurnProxyConfig.PACKET_BUFFER_SIZE)
     val lastLocalAddr = AtomicReference<InetSocketAddress>()
     var toServerPkts = 0
     var fromServerPkts = 0
@@ -339,7 +342,7 @@ private suspend fun runPlainRelay(
                     turnClient.send(buf.copyOf(pkt.length))
                 }
             }.onFailure {
-                if (isFirst) logger("$tag WG→TURN closed: ${it.javaClass.simpleName}")
+                if (isFirst) logger.info(tag, "WG→TURN closed: ${it.javaClass.simpleName}")
             }
         }
 
@@ -353,12 +356,12 @@ private suspend fun runPlainRelay(
                     localSocket.send(DatagramPacket(data, data.size, addr))
                 }
             }.onFailure {
-                if (isFirst) logger("$tag TURN→WG closed: ${it.javaClass.simpleName}")
+                if (isFirst) logger.info(tag, "TURN→WG closed: ${it.javaClass.simpleName}")
             }
         }
     }
 
-    logger("$tag Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
+    logger.info(tag, "Relay done · ↑$toServerPkts ↓$fromServerPkts pkts · up: ${formatTurnProxyDuration(System.currentTimeMillis() - startMs)}")
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────
@@ -366,6 +369,6 @@ private suspend fun runPlainRelay(
 private fun buildTurnAddr(creds: TurnCredentials, hostOverride: String?, portOverride: String?): InetSocketAddress {
     val parts = creds.address.split(":")
     val host = hostOverride ?: parts[0]
-    val port = portOverride?.toInt() ?: parts.getOrNull(1)?.toInt() ?: 3478
+    val port = portOverride?.toInt() ?: parts.getOrNull(1)?.toInt() ?: TurnProxyConfig.TURN_DEFAULT_PORT
     return InetSocketAddress(host, port)
 }

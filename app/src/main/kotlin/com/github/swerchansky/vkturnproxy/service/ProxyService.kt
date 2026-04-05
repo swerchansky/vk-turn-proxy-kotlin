@@ -14,6 +14,7 @@ import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.domain.model.ProxyStats
+import com.github.swerchansky.vkturnproxy.logging.AndroidProxyLogger
 import com.github.swerchansky.vkturnproxy.proxy.formatTurnProxyDuration
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
 import com.github.swerchansky.vkturnproxy.proxy.runProxyConnections
@@ -230,13 +231,14 @@ class ProxyService : Service() {
                     }
                 }
 
+                val proxyLogger = AndroidProxyLogger(onUiLog = ::appendLog)
                 runProxyConnections(
                     link = rawLink,
                     peerAddr = peerAddr,
                     localSocket = socket,
                     provider = credentialProvider,
                     nConnections = n,
-                    logger = ::appendLog,
+                    logger = proxyLogger,
                     onStepChange = { step ->
                         state.value = ProxyConnectionState.Connecting(step, 0, n)
                     },

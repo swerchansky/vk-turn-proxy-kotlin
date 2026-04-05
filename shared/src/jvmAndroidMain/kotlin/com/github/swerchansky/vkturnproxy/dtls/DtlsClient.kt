@@ -1,5 +1,8 @@
 package com.github.swerchansky.vkturnproxy.dtls
 
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
+import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import org.bouncycastle.asn1.sec.SECNamedCurves
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x500.X500Name
@@ -15,7 +18,6 @@ import org.bouncycastle.operator.bc.BcECContentSignerBuilder
 import org.bouncycastle.tls.Certificate
 import org.bouncycastle.tls.CertificateRequest
 import org.bouncycastle.tls.CipherSuite
-import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import org.bouncycastle.tls.DTLSClientProtocol
 import org.bouncycastle.tls.DTLSTransport
 import org.bouncycastle.tls.DatagramTransport
@@ -26,8 +28,8 @@ import org.bouncycastle.tls.SignatureAlgorithm
 import org.bouncycastle.tls.SignatureAndHashAlgorithm
 import org.bouncycastle.tls.TlsAuthentication
 import org.bouncycastle.tls.TlsContext
-import org.bouncycastle.tls.TlsCredentials
 import org.bouncycastle.tls.TlsCredentialedSigner
+import org.bouncycastle.tls.TlsCredentials
 import org.bouncycastle.tls.TlsServerCertificate
 import org.bouncycastle.tls.crypto.TlsCertificate
 import org.bouncycastle.tls.crypto.TlsCryptoParameters
@@ -40,7 +42,6 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.security.SecureRandom
 import java.util.Date
-import java.util.logging.Logger
 
 /**
  * DTLS 1.2 client using BouncyCastle bctls.
@@ -49,9 +50,12 @@ import java.util.logging.Logger
 class DtlsClient(
     private val serverAddr: InetSocketAddress? = null,
     private val readTimeoutMs: Int = 30 * 60 * 1000,
+    private val logger: ProxyLogger = NoOpLogger,
 ) : Closeable {
 
-    private val log = Logger.getLogger("dtls-client")
+    private companion object {
+        const val TAG = "DtlsClient"
+    }
     private var socket: DatagramSocket? = null
     private var dtlsTransport: DTLSTransport? = null
 
@@ -68,14 +72,14 @@ class DtlsClient(
 
     /** Connect through a TURN relay — DTLS packets are sent/received via [turnClient]. */
     fun connectOverTurn(turnClient: TurnClient) =
-        connectWith(TurnDatagramTransport(turnClient))
+        connectWith(TurnDatagramTransport(turnClient, logger))
 
     private fun connectWith(transport: DatagramTransport) {
         val crypto = BcTlsCrypto(SecureRandom())
-        log.fine("DTLS-client: starting handshake (DTLS 1.2, ECDHE-ECDSA-AES128-GCM-SHA256)")
+        logger.debug(TAG, "Starting handshake (DTLS 1.2, ECDHE-ECDSA-AES128-GCM-SHA256)")
         val t0 = System.currentTimeMillis()
         dtlsTransport = DTLSClientProtocol().connect(GoodTurnTlsClient(crypto), transport)
-        log.fine("DTLS-client: handshake complete in ${System.currentTimeMillis() - t0}ms")
+        logger.debug(TAG, "Handshake complete in ${System.currentTimeMillis() - t0}ms")
     }
 
     fun send(data: ByteArray) {

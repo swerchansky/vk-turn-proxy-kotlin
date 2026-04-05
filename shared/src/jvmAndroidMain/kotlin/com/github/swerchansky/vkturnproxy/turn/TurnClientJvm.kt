@@ -1,5 +1,9 @@
 package com.github.swerchansky.vkturnproxy.turn
 
+import com.github.swerchansky.vkturnproxy.config.TurnProxyConfig
+import com.github.swerchansky.vkturnproxy.error.TurnProxyError
+import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
@@ -10,7 +14,6 @@ import java.net.Socket
 import java.security.MessageDigest
 import java.util.Timer
 import java.util.TimerTask
-import java.util.logging.Logger
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -32,10 +35,9 @@ class TurnClient private constructor(
     private val transport: TurnTransportJvm,
     private val credentials: TurnCredentials,
     private val addressFamily: RequestedAddressFamily,
-    private val logger: (String) -> Unit = {},
+    private val logger: ProxyLogger = NoOpLogger,
 ) : Closeable {
 
-    private val log = Logger.getLogger("turn-client")
     private var realm: String = ""
     @Volatile private var nonce: String = ""
     private var allocatedIp: ByteArray = ByteArray(4)
@@ -48,11 +50,13 @@ class TurnClient private constructor(
     // ── lifecycle ──────────────────────────────────────────────────────────
 
     companion object {
+        private const val TAG = "TurnClient"
+
         fun connect(
             serverAddr: InetSocketAddress,
             credentials: TurnCredentials,
             addressFamily: RequestedAddressFamily = RequestedAddressFamily.IPv4,
-            logger: (String) -> Unit = {},
+            logger: ProxyLogger = NoOpLogger,
         ): TurnClient {
             val transport = UdpTurnTransport(serverAddr)
             return TurnClient(transport, credentials, addressFamily, logger)
@@ -63,48 +67,46 @@ class TurnClient private constructor(
         refreshTimer?.cancel()
         refreshTimer = null
         transport.close()
-        log.fine("TURN: closed (relay=${relayAddress()})")
+        logger.debug(TAG, "Closed (relay=${relayAddress()})")
     }
 
     // ── public API ─────────────────────────────────────────────────────────
 
     /** Allocates a relay socket. Must be called once before send/receive. */
     fun allocate() {
-        log.fine("TURN alloc: user='${credentials.username}' transport=${transport.javaClass.simpleName}")
+        logger.debug(TAG, "Alloc: user='${credentials.username}' transport=${transport.javaClass.simpleName}")
 
         val req1 = buildAllocateRequest()
         val resp1 = transport.sendReceive(req1)
-            ?: error("TURN Allocate: no response")
+            ?: throw TurnProxyError.TurnAllocationFailed("no response from server")
 
         if (resp1.cls == StunClass.ERROR) {
             val errCode = parseErrorCode(resp1)
             if (errCode == 401) {
                 realm = resp1.getAttr(StunAttr.REALM)?.decodeToString() ?: ""
                 nonce = resp1.getAttr(StunAttr.NONCE)?.decodeToString() ?: ""
-                log.fine("TURN auth challenge: realm='$realm'")
+                logger.debug(TAG, "Auth challenge: realm='$realm'")
 
                 val req2 = buildAllocateRequest()
                 addMessageIntegrity(req2)
 
                 val resp2 = transport.sendReceive(req2)
-                    ?: error("TURN Allocate (authenticated): no response")
+                    ?: throw TurnProxyError.TurnAllocationFailed("no response after authentication")
 
-                check(resp2.cls == StunClass.SUCCESS) {
-                    "TURN Allocate failed: ${decodeErrorCode(resp2.getAttr(StunAttr.ERROR_CODE))}"
-                }
+                if (resp2.cls != StunClass.SUCCESS)
+                    throw TurnProxyError.TurnAllocationFailed(decodeErrorCode(resp2.getAttr(StunAttr.ERROR_CODE)))
                 extractRelayAddress(resp2)
                 startRefreshTimer()
-                log.info("TURN allocated relay=${relayAddress()}")
+                logger.info(TAG, "Allocated relay=${relayAddress()}")
                 return
             }
-            error("TURN Allocate failed: ${decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE))}")
+            throw TurnProxyError.TurnAllocationFailed(decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE)))
         }
-        check(resp1.cls == StunClass.SUCCESS) {
-            "TURN Allocate failed: ${decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE))}"
-        }
+        if (resp1.cls != StunClass.SUCCESS)
+            throw TurnProxyError.TurnAllocationFailed(decodeErrorCode(resp1.getAttr(StunAttr.ERROR_CODE)))
         extractRelayAddress(resp1)
         startRefreshTimer()
-        log.info("TURN allocated relay=${relayAddress()}")
+        logger.info(TAG, "Allocated relay=${relayAddress()}")
     }
 
     /**
@@ -119,7 +121,8 @@ class TurnClient private constructor(
         try {
             // Refresh allocation (LIFETIME = 600 s = 10 min)
             val allocReq = StunMessage(StunMethod.REFRESH, StunClass.REQUEST)
-            allocReq.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, 0x02, 0x58))
+            val lifetime = TurnProxyConfig.TURN_ALLOCATION_LIFETIME_S
+            allocReq.addAttr(StunAttr.LIFETIME, byteArrayOf(0, 0, (lifetime ushr 8).toByte(), (lifetime and 0xFF).toByte()))
             addMessageIntegrity(allocReq)
             transport.sendRaw(allocReq.encode())
 
@@ -134,20 +137,19 @@ class TurnClient private constructor(
                 chReq.addXorIpv4Attr(StunAttr.XOR_PEER_ADDRESS, boundPeerIp, boundPeerPort)
                 addMessageIntegrity(chReq)
                 transport.sendRaw(chReq.encode())
-                logger("Keepalive sent · relay=${relayAddress()}")
+                logger.info(TAG, "Keepalive sent · relay=${relayAddress()}")
             } else {
-                logger("Keepalive sent · relay=${relayAddress()} (no channel)")
+                logger.info(TAG, "Keepalive sent · relay=${relayAddress()} (no channel)")
             }
         } catch (e: Exception) {
             val msg = "${e.javaClass.simpleName}: ${e.message}"
-            log.warning("TURN keepalive error: $msg")
-            logger("Keepalive error: $msg")
+            logger.warn(TAG, "Keepalive error: $msg")
         }
     }
 
     private fun startRefreshTimer() {
         // Refresh every 5 minutes (default allocation lifetime is 10 minutes)
-        val intervalMs = 5 * 60 * 1000L
+        val intervalMs = TurnProxyConfig.TURN_REFRESH_INTERVAL_MS
         val timer = Timer("turn-refresh", true)
         timer.scheduleAtFixedRate(object : TimerTask() {
             override fun run() { refresh() }
@@ -165,10 +167,10 @@ class TurnClient private constructor(
      * Binds a channel to the given peer for efficient ChannelData framing.
      * [channel] must be in 0x4000..0x7FFE range.
      */
-    fun channelBind(peerIp: ByteArray, peerPort: Int, channel: Int = 0x4000) {
-        check(channel in CHANNEL_DATA_MIN until CHANNEL_DATA_MAX) { "Invalid channel number" }
+    fun channelBind(peerIp: ByteArray, peerPort: Int, channel: Int = TurnProxyConfig.CHANNEL_MIN) {
+        check(channel in TurnProxyConfig.CHANNEL_MIN..TurnProxyConfig.CHANNEL_MAX) { "Invalid channel number" }
         val peerStr = peerIp.joinToString(".") { (it.toInt() and 0xFF).toString() } + ":$peerPort"
-        log.fine("TURN channelBind: channel=0x${channel.toString(16)} peer=$peerStr")
+        logger.debug(TAG, "ChannelBind: channel=0x${channel.toString(16)} peer=$peerStr")
         boundChannel = channel
         boundPeerIp = peerIp.copyOf()
         boundPeerPort = peerPort
@@ -183,11 +185,10 @@ class TurnClient private constructor(
         addMessageIntegrity(req)
 
         val resp = transport.sendReceive(req)
-            ?: error("ChannelBind: no response")
-        check(resp.cls == StunClass.SUCCESS) {
-            "ChannelBind failed: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}"
-        }
-        log.info("TURN channelBind OK: channel=0x${channel.toString(16)} peer=$peerStr")
+            ?: throw TurnProxyError.TurnAllocationFailed("ChannelBind: no response")
+        if (resp.cls != StunClass.SUCCESS)
+            throw TurnProxyError.TurnAllocationFailed("ChannelBind: ${decodeErrorCode(resp.getAttr(StunAttr.ERROR_CODE))}")
+        logger.info(TAG, "ChannelBind OK: channel=0x${channel.toString(16)} peer=$peerStr")
     }
 
     /** Sets receive timeout on the underlying transport socket (0 = block forever). */
@@ -201,7 +202,7 @@ class TurnClient private constructor(
         check(boundChannel >= 0) { "Must call channelBind before send" }
         sendCount++
         if (sendCount <= 5 || sendCount % 100 == 0)
-            log.fine("TURN send #$sendCount ${data.size}B via channel 0x${boundChannel.toString(16)}")
+            logger.debug(TAG, "Send #$sendCount ${data.size}B via channel 0x${boundChannel.toString(16)}")
         val frame = StunMessage.encodeChannelData(boundChannel, data)
         transport.sendRaw(frame)
     }
@@ -217,10 +218,10 @@ class TurnClient private constructor(
             if (ch == boundChannel) {
                 recvCount++
                 if (recvCount <= 5 || recvCount % 100 == 0)
-                    log.fine("TURN recv #$recvCount ${payload.size}B from channel 0x${ch.toString(16)}")
+                    logger.debug(TAG, "Recv #$recvCount ${payload.size}B from channel 0x${ch.toString(16)}")
                 return payload
             }
-            log.warning("TURN recv: unexpected channel 0x${ch.toString(16)} (bound=0x${boundChannel.toString(16)}), dropping")
+            logger.warn(TAG, "Recv: unexpected channel 0x${ch.toString(16)} (bound=0x${boundChannel.toString(16)}), dropping")
             return null
         }
         // Non-channel-data: could be STUN response to keepalive, indication, etc.
@@ -232,17 +233,17 @@ class TurnClient private constructor(
                 // so the allocation doesn't expire before the next timer tick (5 min away).
                 val newNonce = msg.getAttr(StunAttr.NONCE)?.decodeToString()
                 if (!newNonce.isNullOrEmpty()) {
-                    log.fine("TURN recv: 438 Stale Nonce → updating nonce and retrying refresh")
+                    logger.debug(TAG, "438 Stale Nonce → updating nonce and retrying refresh")
                     nonce = newNonce
                     Thread({ refresh() }, "turn-nonce-refresh").also { it.isDaemon = true }.start()
                 } else {
-                    log.warning("TURN recv: 438 Stale Nonce but response has no NONCE attr")
+                    logger.warn(TAG, "438 Stale Nonce but response has no NONCE attr")
                 }
             } else {
-                log.fine("TURN recv: non-ChannelData STUN msg method=0x${msg.method.toString(16)} cls=0x${msg.cls.toString(16)}, skipping")
+                logger.debug(TAG, "Non-ChannelData STUN msg method=0x${msg.method.toString(16)} cls=0x${msg.cls.toString(16)}, skipping")
             }
         } else {
-            log.warning("TURN recv: unrecognised ${raw.size}B frame (hdr=${raw.take(4).joinToString("") { "%02x".format(it) }}), skipping")
+            logger.warn(TAG, "Unrecognised ${raw.size}B frame (hdr=${raw.take(4).joinToString("") { "%02x".format(it) }}), skipping")
         }
         return null
     }
@@ -260,9 +261,9 @@ class TurnClient private constructor(
 
     private fun extractRelayAddress(resp: StunMessage) {
         val attr = resp.getAttr(StunAttr.XOR_RELAYED_ADDRESS)
-            ?: error("Missing XOR-RELAYED-ADDRESS in Allocate response")
+            ?: throw TurnProxyError.TurnAllocationFailed("Missing XOR-RELAYED-ADDRESS in Allocate response")
         val (ip, port) = decodeXorIpv4Address(attr)
-            ?: error("Cannot decode XOR-RELAYED-ADDRESS (IPv6 not supported)")
+            ?: throw TurnProxyError.TurnAllocationFailed("Cannot decode XOR-RELAYED-ADDRESS (IPv6 not supported)")
         allocatedIp = ip
         allocatedPort = port
     }
@@ -285,33 +286,8 @@ class TurnClient private constructor(
         val mac = Mac.getInstance("HmacSHA1").apply {
             init(SecretKeySpec(key, "HmacSHA1"))
         }.doFinal(macData)
-        log.fine("MI: keyInput='${credentials.username}:$realm:***' mac=${mac.hex()}")
+        logger.debug(TAG, "MI: keyInput='${credentials.username}:$realm:***' mac=${mac.hex()}")
         msg.addAttr(StunAttr.MESSAGE_INTEGRITY, mac)
-    }
-
-    private fun logAttrs(prefix: String, msg: StunMessage) {
-        if (!log.isLoggable(java.util.logging.Level.FINE)) return
-        msg.allAttrs().forEach { (t, v) ->
-            val name = when (t) {
-                StunAttr.USERNAME -> "USERNAME"
-                StunAttr.MESSAGE_INTEGRITY -> "MESSAGE_INTEGRITY"
-                StunAttr.ERROR_CODE -> "ERROR_CODE"
-                StunAttr.REALM -> "REALM"
-                StunAttr.NONCE -> "NONCE"
-                StunAttr.XOR_PEER_ADDRESS -> "XOR_PEER_ADDRESS"
-                StunAttr.XOR_RELAYED_ADDRESS -> "XOR_RELAYED_ADDRESS"
-                StunAttr.REQUESTED_ADDRESS_FAMILY -> "REQUESTED_ADDRESS_FAMILY"
-                StunAttr.REQUESTED_TRANSPORT -> "REQUESTED_TRANSPORT"
-                StunAttr.CHANNEL_NUMBER -> "CHANNEL_NUMBER"
-                else -> "0x${t.toString(16)}"
-            }
-            val display = when (t) {
-                StunAttr.USERNAME, StunAttr.REALM, StunAttr.NONCE -> "'${v.decodeToString()}'"
-                StunAttr.ERROR_CODE -> decodeErrorCode(v)
-                else -> v.hex()
-            }
-            log.fine("$prefix attr $name = $display")
-        }
     }
 
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it) }
@@ -387,7 +363,7 @@ private class TcpTurnTransport(
         var read = 0
         while (read < buf.size) {
             val n = stream.read(buf, read, buf.size - read)
-            if (n < 0) error("Connection closed while reading TURN response")
+            if (n < 0) throw TurnProxyError.TransportError("Connection closed while reading TURN response")
             read += n
         }
     }

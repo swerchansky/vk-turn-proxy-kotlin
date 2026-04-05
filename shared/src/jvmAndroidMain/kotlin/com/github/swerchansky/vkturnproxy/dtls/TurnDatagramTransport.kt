@@ -1,9 +1,9 @@
 package com.github.swerchansky.vkturnproxy.dtls
 
+import com.github.swerchansky.vkturnproxy.logging.ProxyLogger
 import com.github.swerchansky.vkturnproxy.turn.TurnClient
 import org.bouncycastle.tls.DatagramTransport
 import java.net.SocketTimeoutException
-import java.util.logging.Logger
 
 /**
  * Adapts [TurnClient] as a [DatagramTransport] for BouncyCastle DTLS.
@@ -11,9 +11,12 @@ import java.util.logging.Logger
  */
 internal class TurnDatagramTransport(
     private val turnClient: TurnClient,
+    private val logger: ProxyLogger,
 ) : DatagramTransport {
 
-    private val log = Logger.getLogger("turn-dtls-transport")
+    private companion object {
+        const val TAG = "TurnTransport"
+    }
 
     override fun getSendLimit(): Int = 1500
     override fun getReceiveLimit(): Int = 1500
@@ -28,7 +31,7 @@ internal class TurnDatagramTransport(
         while (true) {
             val remaining = (deadline - System.currentTimeMillis()).toInt()
             if (remaining <= 0) {
-                log.fine("DTLS←TURN: deadline expired after ${waitMillis}ms")
+                logger.debug(TAG, "DTLS←TURN: deadline expired after ${waitMillis}ms")
                 return -1
             }
             turnClient.setReceiveTimeout(remaining.coerceAtMost(2_000))
@@ -40,7 +43,7 @@ internal class TurnDatagramTransport(
                 }
                 val copyLen = minOf(len, payload.size)
                 if (payload.size > len) {
-                    log.warning("DTLS←TURN: payload ${payload.size}B > buffer ${len}B, truncating!")
+                    logger.warn(TAG, "DTLS←TURN: payload ${payload.size}B > buffer ${len}B, truncating!")
                 }
                 payload.copyInto(data, off, 0, copyLen)
                 return copyLen

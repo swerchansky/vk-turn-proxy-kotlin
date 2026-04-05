@@ -1,12 +1,12 @@
 package com.github.swerchansky.vkturnproxy.dns
 
-import org.xbill.DNS.ExtendedResolver
+import com.github.swerchansky.vkturnproxy.config.TurnProxyConfig
+import com.github.swerchansky.vkturnproxy.error.TurnProxyError
 import org.xbill.DNS.Lookup
 import org.xbill.DNS.SimpleResolver
 import org.xbill.DNS.Type
 import java.net.InetAddress
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -29,8 +29,8 @@ object FallbackDnsResolver {
         "1.1.1.1:53",
     )
 
-    private val cache = LruCache<String, CacheEntry>(maxSize = 100)
-    private val cacheTtl: Duration = Duration.ofHours(10)
+    private val cache = LruCache<String, CacheEntry>(maxSize = TurnProxyConfig.DNS_CACHE_SIZE)
+    private val cacheTtl: Duration = Duration.ofHours(TurnProxyConfig.DNS_CACHE_TTL_HOURS)
 
     /**
      * Resolves [hostname] to an IPv4 address using the fallback resolver chain.
@@ -73,7 +73,7 @@ object FallbackDnsResolver {
                 lastError = e
             }
         }
-        throw lastError ?: IllegalStateException("Cannot resolve $hostname: no resolvers responded")
+        throw TurnProxyError.DnsResolutionFailed(hostname)
     }
 }
 
