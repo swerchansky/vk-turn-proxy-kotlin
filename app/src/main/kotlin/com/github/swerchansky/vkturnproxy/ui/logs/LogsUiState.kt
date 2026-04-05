@@ -1,6 +1,6 @@
 package com.github.swerchansky.vkturnproxy.ui.logs
 
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.ui.connect.StatusColor
 
 data class LogLine(

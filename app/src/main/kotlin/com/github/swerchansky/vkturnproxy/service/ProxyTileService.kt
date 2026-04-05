@@ -5,7 +5,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.ui.main.MainActivity
 
 @RequiresApi(Build.VERSION_CODES.N)

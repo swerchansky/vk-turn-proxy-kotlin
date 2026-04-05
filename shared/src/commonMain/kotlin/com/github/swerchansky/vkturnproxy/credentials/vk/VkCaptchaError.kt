@@ -1,8 +1,8 @@
-package com.github.swerchansky.vkturnproxy.credentials
+package com.github.swerchansky.vkturnproxy.credentials.vk
 
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 data class VkCaptchaError(
     val errorCode: Int,
@@ -19,7 +19,10 @@ data class VkCaptchaError(
         fun parse(error: JsonObject): VkCaptchaError? {
             val code = error["error_code"]?.jsonPrimitive?.intOrNull ?: return null
             val redirectUri = error["redirect_uri"]?.jsonPrimitive?.content.orEmpty()
-            val sessionToken = if (redirectUri.isNotEmpty()) extractQueryParam(redirectUri, "session_token") else ""
+            val sessionToken = if (redirectUri.isNotEmpty()) extractQueryParam(
+                redirectUri,
+                "session_token"
+            ) else ""
             return VkCaptchaError(
                 errorCode = code,
                 captchaSid = error["captcha_sid"]?.jsonPrimitive?.content.orEmpty(),

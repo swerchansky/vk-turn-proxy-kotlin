@@ -11,20 +11,21 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
-import com.github.swerchansky.vkturnproxy.credentials.VkCredentialProvider
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyStats
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCredentialProvider
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyStats
 import com.github.swerchansky.vkturnproxy.logging.AndroidProxyLogger
+import com.github.swerchansky.vkturnproxy.proxy.TunnelEvent
+import com.github.swerchansky.vkturnproxy.proxy.TunnelParams
+import com.github.swerchansky.vkturnproxy.proxy.TurnProxyEngine
 import com.github.swerchansky.vkturnproxy.proxy.formatTurnProxyDuration
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
-import com.github.swerchansky.vkturnproxy.proxy.runProxyConnections
 import com.github.swerchansky.vkturnproxy.ui.main.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -34,7 +35,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
@@ -79,9 +79,6 @@ class ProxyService : Service() {
     private var proxyJob: Job? = null
     private var localSocket: DatagramSocket? = null
 
-    private val toServerCounter = AtomicLong(0)
-    private val fromServerCounter = AtomicLong(0)
-
     override fun onCreate() {
         super.onCreate()
         (applicationContext as App).appComponent.inject(this)
@@ -99,8 +96,6 @@ class ProxyService : Service() {
                 val n = intent.getIntExtra(EXTRA_N, 0)
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
                 proxyJob?.cancel()
-                toServerCounter.set(0)
-                fromServerCounter.set(0)
                 stats.value = ProxyStats()
                 proxyJob = scope.launch { runProxy(link, peer, port, n) }
             }
@@ -120,15 +115,20 @@ class ProxyService : Service() {
     }
 
     private fun stopProxy() {
-        val to = toServerCounter.get()
-        val from = fromServerCounter.get()
-        val dur = stats.value.connectedSince
+        val currentStats = stats.value
+        val dur = currentStats.connectedSince
             .let { if (it > 0) " · ${formatDuration(System.currentTimeMillis() - it)}" else "" }
+        appendLog(
+            "Disconnected$dur · ↑${formatPackets(currentStats.toServerPkts)} ↓${
+                formatPackets(
+                    currentStats.fromServerPkts
+                )
+            } pkts"
+        )
         proxyJob?.cancel()
         proxyJob = null
         localSocket?.close()
         localSocket = null
-        appendLog("Disconnected$dur · ↑${formatPackets(to)} ↓${formatPackets(from)} pkts")
         state.value = ProxyConnectionState.Idle
         stats.value = ProxyStats()
         @Suppress("DEPRECATION")
@@ -199,82 +199,85 @@ class ProxyService : Service() {
         val socket = DatagramSocket(InetSocketAddress("127.0.0.1", listenPort))
         localSocket = socket
 
-        // Tracks ready count for notification text while connecting
         val readyCountRef = AtomicInteger(0)
         val relayAddrRef = AtomicReference("")
 
-        try {
-            coroutineScope {
-                // Stats updater — starts immediately, reads relayAddrRef once tunnel is up
-                launch {
-                    var prevTo = 0L
-                    var prevFrom = 0L
-                    while (true) {
-                        delay(1000)
-                        val to = toServerCounter.get()
-                        val from = fromServerCounter.get()
-                        stats.value = stats.value.copy(
-                            toServerPkts = to,
-                            fromServerPkts = from,
-                            toServerPps = (to - prevTo).toFloat(),
-                            fromServerPps = (from - prevFrom).toFloat(),
-                        )
-                        prevTo = to
-                        prevFrom = from
-                        val relayAddr = relayAddrRef.get()
-                        if (relayAddr.isEmpty()) continue
-                        val c = readyCountRef.get()
-                        updateNotification(
-                            if (c >= n) "↑${formatPackets(to)} ↓${formatPackets(from)} pkts — $relayAddr"
-                            else "Establishing $c/$n — ↑${formatPackets(to)} ↓${formatPackets(from)}"
-                        )
-                    }
-                }
+        val proxyLogger = AndroidProxyLogger(onUiLog = ::appendLog)
+        val engine = TurnProxyEngine(credentialProvider, proxyLogger)
 
-                val proxyLogger = AndroidProxyLogger(onUiLog = ::appendLog)
-                runProxyConnections(
-                    link = rawLink,
-                    peerAddr = peerAddr,
-                    localSocket = socket,
-                    provider = credentialProvider,
-                    nConnections = n,
-                    logger = proxyLogger,
-                    onStepChange = { step ->
-                        state.value = ProxyConnectionState.Connecting(step, 0, n)
-                    },
-                    onFirstReady = { relayAddr ->
-                        relayAddrRef.set(relayAddr)
-                        val connectedAt = System.currentTimeMillis()
-                        appendLog(
-                            "Tunnel up in " +
-                                    "${formatTurnProxyDuration(connectedAt - sessionStartMs)} " +
-                                    "· relay: $relayAddr · WG: 127.0.0.1:$listenPort"
-                        )
-                        stats.value =
-                            ProxyStats(connectedSince = connectedAt, relayAddr = relayAddr)
-                    },
-                    onConnectionReady = { c, total, relayAddr ->
-                        readyCountRef.set(c)
-                        if (c >= total) {
-                            appendLog("All $total/$total connections established")
-                            state.value = ProxyConnectionState.Connected(relayAddr)
-                            updateNotification("Connected ×$total — $relayAddr")
-                        } else {
-                            state.value = ProxyConnectionState.Connecting(
-                                "Establishing connections",
-                                c,
-                                total
+        try {
+            val statsJob = scope.launch {
+                var prevTo = 0L
+                var prevFrom = 0L
+                while (true) {
+                    delay(1000)
+                    val to = engine.toServerPackets.get()
+                    val from = engine.fromServerPackets.get()
+                    stats.value = stats.value.copy(
+                        toServerPkts = to,
+                        fromServerPkts = from,
+                        toServerPps = (to - prevTo).toFloat(),
+                        fromServerPps = (from - prevFrom).toFloat(),
+                    )
+                    prevTo = to
+                    prevFrom = from
+                    val relayAddr = relayAddrRef.get()
+                    if (relayAddr.isEmpty()) continue
+                    val c = readyCountRef.get()
+                    updateNotification(
+                        if (c >= n) "↑${formatPackets(to)} ↓${formatPackets(from)} pkts — $relayAddr"
+                        else "Establishing $c/$n — ↑${formatPackets(to)} ↓${formatPackets(from)}"
+                    )
+                }
+            }
+
+            try {
+                engine.runConnections(
+                    TunnelParams(
+                        link = rawLink,
+                        peerAddr = peerAddr,
+                        localSocket = socket,
+                        nConnections = n,
+                    )
+                ).collect { event ->
+                    when (event) {
+                        is TunnelEvent.StepChanged ->
+                            state.value = ProxyConnectionState.Connecting(event.step, 0, n)
+
+                        is TunnelEvent.FirstReady -> {
+                            relayAddrRef.set(event.relayAddr)
+                            val connectedAt = System.currentTimeMillis()
+                            appendLog(
+                                "Tunnel up in ${formatTurnProxyDuration(connectedAt - sessionStartMs)}" +
+                                        " · relay: ${event.relayAddr} · WG: 127.0.0.1:$listenPort"
+                            )
+                            stats.value = ProxyStats(
+                                connectedSince = connectedAt,
+                                relayAddr = event.relayAddr,
                             )
                         }
-                    },
-                    onPacketToServer = { toServerCounter.incrementAndGet() },
-                    onPacketFromServer = { fromServerCounter.incrementAndGet() },
-                )
+
+                        is TunnelEvent.ConnectionReady -> {
+                            readyCountRef.set(event.count)
+                            if (event.count >= event.total) {
+                                appendLog("All ${event.total}/${event.total} connections established")
+                                state.value = ProxyConnectionState.Connected(event.relayAddr)
+                                updateNotification("Connected ×${event.total} — ${event.relayAddr}")
+                            } else {
+                                state.value = ProxyConnectionState.Connecting(
+                                    "Establishing connections", event.count, event.total
+                                )
+                            }
+                        }
+                    }
+                }
+            } finally {
+                statsJob.cancel()
             }
 
             val dur = formatTurnProxyDuration(System.currentTimeMillis() - sessionStartMs)
-            val to = toServerCounter.get()
-            val from = fromServerCounter.get()
+            val to = engine.toServerPackets.get()
+            val from = engine.fromServerPackets.get()
             appendLog(
                 "All connections closed · session: $dur · ↑${formatPackets(to)} ↓${
                     formatPackets(

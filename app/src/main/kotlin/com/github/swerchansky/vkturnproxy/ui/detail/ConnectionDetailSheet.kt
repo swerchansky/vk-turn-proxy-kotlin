@@ -16,7 +16,7 @@ import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.data.repository.ProxyRepository
 import com.github.swerchansky.vkturnproxy.databinding.BottomSheetConnectionDetailBinding
-import com.github.swerchansky.vkturnproxy.domain.model.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch

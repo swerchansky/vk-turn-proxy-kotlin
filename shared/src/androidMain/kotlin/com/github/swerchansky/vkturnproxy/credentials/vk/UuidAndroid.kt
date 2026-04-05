@@ -1,4 +1,4 @@
-package com.github.swerchansky.vkturnproxy.credentials
+package com.github.swerchansky.vkturnproxy.credentials.vk
 
 import java.util.UUID
 

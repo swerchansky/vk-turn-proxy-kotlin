@@ -1,4 +1,4 @@
-package com.github.swerchansky.vkturnproxy.credentials
+package com.github.swerchansky.vkturnproxy.credentials.vk
 
 import com.github.swerchansky.vkturnproxy.error.TurnProxyError
 import com.github.swerchansky.vkturnproxy.logging.NoOpLogger
@@ -36,23 +36,19 @@ private const val STEP_DELAY_MS = 200L
  *  Returns: success_token string (non-null)
  *
  * Fallback path (slider captcha, status=BOT):
- *  [onFallbackRequired] is called with the captcha URL and must suspend until
- *  the user completes the captcha in a WebView (detected via URL redirect to call page).
- *  Returns: null → caller must do a plain fresh retry of the API call.
- *  VK's backend marks the session verified after WebView solve, so a fresh call succeeds.
+ *  Throws [TurnProxyError.CredentialFetchFailed] — slider captcha cannot be solved automatically.
  */
-class VkCaptchaSolver(
+class VkCaptchaHandler(
     private val client: HttpClient,
     private val logger: ProxyLogger = NoOpLogger,
 ) {
-
     private companion object {
         const val TAG = "VkCaptcha"
     }
 
     /**
      * Returns success_token on success.
-     * Throws if PoW fails (e.g. status=BOT — slider captcha that cannot be solved automatically).
+     * Throws if PoW fails (e.g. status=BOT — slider captcha).
      */
     suspend fun solve(error: VkCaptchaError): String {
         require(error.isNotRobotCaptcha) { "Not a solvable captcha error: $error" }
@@ -101,7 +97,8 @@ class VkCaptchaSolver(
 
     /** Returns success_token if status=OK, null if status=BOT or other non-OK. */
     private suspend fun callCaptchaNotRobotApi(sessionToken: String, hash: String): String? {
-        val baseParams = "session_token=${sessionToken.encodeURLParameter()}&domain=vk.com&adFp=&access_token="
+        val baseParams =
+            "session_token=${sessionToken.encodeURLParameter()}&domain=vk.com&adFp=&access_token="
         val browserFp = buildBrowserFp()
 
         logger.info(TAG, "API 1/4: settings")
@@ -109,7 +106,8 @@ class VkCaptchaSolver(
         delay(STEP_DELAY_MS)
 
         logger.info(TAG, "API 2/4: componentDone")
-        val deviceJson = """{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1032,"innerWidth":1920,"innerHeight":945,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":16,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"denied"}"""
+        val deviceJson =
+            """{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1032,"innerWidth":1920,"innerHeight":945,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":16,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"denied"}"""
         vkApiPost(
             "captchaNotRobot.componentDone",
             "$baseParams&browser_fp=$browserFp&device=${deviceJson.encodeURLParameter()}",
@@ -117,7 +115,8 @@ class VkCaptchaSolver(
         delay(STEP_DELAY_MS)
 
         logger.info(TAG, "API 3/4: check")
-        val checkResp = vkApiPost("captchaNotRobot.check", buildCheckParams(baseParams, browserFp, hash))
+        val checkResp =
+            vkApiPost("captchaNotRobot.check", buildCheckParams(baseParams, browserFp, hash))
         delay(STEP_DELAY_MS)
 
         val successToken = extractSuccessToken(checkResp)
@@ -132,22 +131,23 @@ class VkCaptchaSolver(
     }
 
     private fun buildCheckParams(baseParams: String, browserFp: String, hash: String): String {
-        val cursorJson = """[{"x":950,"y":500},{"x":945,"y":510},{"x":940,"y":520},{"x":938,"y":525},{"x":938,"y":525}]"""
+        val cursorJson =
+            """[{"x":950,"y":500},{"x":945,"y":510},{"x":940,"y":520},{"x":938,"y":525},{"x":938,"y":525}]"""
         val downlink = "[9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5]"
         val answer = "e30="
         val debugInfo = "d44f534ce8deb56ba20be52e05c433309b49ee4d2a70602deeb17a1954257785"
         return "$baseParams" +
-            "&accelerometer=${"[]".encodeURLParameter()}" +
-            "&gyroscope=${"[]".encodeURLParameter()}" +
-            "&motion=${"[]".encodeURLParameter()}" +
-            "&cursor=${cursorJson.encodeURLParameter()}" +
-            "&taps=${"[]".encodeURLParameter()}" +
-            "&connectionRtt=${"[]".encodeURLParameter()}" +
-            "&connectionDownlink=${downlink.encodeURLParameter()}" +
-            "&browser_fp=$browserFp" +
-            "&hash=$hash" +
-            "&answer=$answer" +
-            "&debug_info=$debugInfo"
+                "&accelerometer=${"[]".encodeURLParameter()}" +
+                "&gyroscope=${"[]".encodeURLParameter()}" +
+                "&motion=${"[]".encodeURLParameter()}" +
+                "&cursor=${cursorJson.encodeURLParameter()}" +
+                "&taps=${"[]".encodeURLParameter()}" +
+                "&connectionRtt=${"[]".encodeURLParameter()}" +
+                "&connectionDownlink=${downlink.encodeURLParameter()}" +
+                "&browser_fp=$browserFp" +
+                "&hash=$hash" +
+                "&answer=$answer" +
+                "&debug_info=$debugInfo"
     }
 
     private fun extractSuccessToken(resp: JsonObject): String? {
@@ -172,7 +172,10 @@ class VkCaptchaSolver(
                 append("Origin", "https://vk.ru")
                 append("Referer", "https://vk.ru/")
                 append("sec-ch-ua-platform", "\"Linux\"")
-                append("sec-ch-ua", "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"")
+                append(
+                    "sec-ch-ua",
+                    "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\""
+                )
                 append("sec-ch-ua-mobile", "?0")
                 append("DNT", "1")
                 append("Sec-Fetch-Site", "same-site")
