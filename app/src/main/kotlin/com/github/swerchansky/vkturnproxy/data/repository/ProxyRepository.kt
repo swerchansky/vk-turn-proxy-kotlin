@@ -22,7 +22,6 @@ class ProxyRepository @Inject constructor(private val app: Application) {
             putExtra(ProxyService.EXTRA_LINK, link)
             putExtra(ProxyService.EXTRA_PEER, peer)
             putExtra(ProxyService.EXTRA_PORT, port)
-            putExtra(ProxyService.EXTRA_IS_VK, true)
             putExtra(ProxyService.EXTRA_N, nConnections)
         })
     }
