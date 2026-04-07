@@ -70,6 +70,7 @@ fun LogsDataState.toUiState(): LogsUiState {
 private fun ProxyConnectionState.toStatusColor() = when (this) {
     ProxyConnectionState.Idle -> StatusColor.IDLE
     is ProxyConnectionState.Connecting -> StatusColor.CONNECTING
+    is ProxyConnectionState.CaptchaRequired -> StatusColor.CONNECTING
     is ProxyConnectionState.Connected -> StatusColor.CONNECTED
     is ProxyConnectionState.Error -> StatusColor.ERROR
 }
@@ -77,6 +78,10 @@ private fun ProxyConnectionState.toStatusColor() = when (this) {
 private fun ProxyConnectionState.toLabel() = when (this) {
     ProxyConnectionState.Idle -> "Idle"
     is ProxyConnectionState.Connecting -> "Connecting..."
-    is ProxyConnectionState.Connected -> "Connected"
+    is ProxyConnectionState.CaptchaRequired -> "Captcha"
+    is ProxyConnectionState.Connected -> {
+        val c = this as ProxyConnectionState.Connected
+        if (c.connectedCount in 1 until c.totalConnections) "${c.connectedCount}/${c.totalConnections}" else "Connected"
+    }
     is ProxyConnectionState.Error -> "Error"
 }

@@ -47,8 +47,16 @@ class VkCaptchaHandler(
     }
 
     /**
+     * Called when automatic PoW returns status=BOT (slider captcha).
+     * Must show the captcha URL to the user and suspend until they solve it.
+     * Returns the success_token captured from the WebView.
+     * If null, [solve] will throw [TurnProxyError.CredentialFetchFailed].
+     */
+    var onFallbackRequired: (suspend (captchaUrl: String) -> String)? = null
+
+    /**
      * Returns success_token on success.
-     * Throws if PoW fails (e.g. status=BOT — slider captcha).
+     * On status=BOT: calls [onFallbackRequired] if set, otherwise throws.
      */
     suspend fun solve(error: VkCaptchaError): String {
         require(error.isNotRobotCaptcha) { "Not a solvable captcha error: $error" }
@@ -61,10 +69,18 @@ class VkCaptchaHandler(
         logger.info(TAG, "PoW solved: ${hash.take(16)}...")
 
         val autoToken = callCaptchaNotRobotApi(sessionToken = error.sessionToken, hash = hash)
-            ?: throw TurnProxyError.CredentialFetchFailed("captchaNotRobot returned non-OK status (slider captcha) — cannot solve automatically")
+        if (autoToken != null) {
+            logger.info(TAG, "Automatic solve succeeded")
+            return autoToken
+        }
 
-        logger.info(TAG, "Automatic solve succeeded")
-        return autoToken
+        // status=BOT — slider captcha, must be solved manually in a WebView.
+        logger.info(TAG, "status=BOT — requesting manual solve from user")
+        val fallback = onFallbackRequired
+            ?: throw TurnProxyError.CredentialFetchFailed("slider captcha requires WebView but no fallback handler is configured")
+        val token = fallback(error.redirectUri)
+        logger.info(TAG, "WebView returned success_token")
+        return token
     }
 
     private suspend fun fetchPowChallenge(redirectUri: String): Pair<String, Int> {

@@ -42,6 +42,7 @@ fun ConnectDataState.toUiState() = ConnectUiState(
     statusColor = when (connectionState) {
         ProxyConnectionState.Idle -> StatusColor.IDLE
         is ProxyConnectionState.Connecting -> StatusColor.CONNECTING
+        is ProxyConnectionState.CaptchaRequired -> StatusColor.CONNECTING
         is ProxyConnectionState.Connected -> StatusColor.CONNECTED
         is ProxyConnectionState.Error -> StatusColor.ERROR
     },
@@ -51,7 +52,12 @@ fun ConnectDataState.toUiState() = ConnectUiState(
             val cs = connectionState as ProxyConnectionState.Connecting
             if (cs.connectedCount > 0) "${cs.connectedCount}/${cs.totalConnections}" else cs.step
         }
-        is ProxyConnectionState.Connected -> "Connected"
+        is ProxyConnectionState.CaptchaRequired -> "Captcha"
+        is ProxyConnectionState.Connected -> {
+            val cs = connectionState as ProxyConnectionState.Connected
+            if (cs.connectedCount in 1 until cs.totalConnections) "${cs.connectedCount}/${cs.totalConnections}"
+            else "Connected"
+        }
         is ProxyConnectionState.Error -> "Error"
     },
     sessionTimer = formatDuration(elapsedSeconds),
@@ -76,7 +82,9 @@ fun ConnectDataState.toUiState() = ConnectUiState(
     peer = peer,
     serverHistoryItems = buildDropdownItems(favorites, serverHistory),
     actionButtonLabel = when (connectionState) {
-        is ProxyConnectionState.Connected, is ProxyConnectionState.Connecting -> "Disconnect"
+        is ProxyConnectionState.Connected,
+        is ProxyConnectionState.Connecting,
+        is ProxyConnectionState.CaptchaRequired -> "Disconnect"
         else -> "Connect"
     },
     actionButtonEnabled = link.isNotBlank() && peer.isNotBlank(),

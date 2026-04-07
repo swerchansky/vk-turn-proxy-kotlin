@@ -66,8 +66,31 @@ class TurnProxyEngine(
     fun runConnections(params: TunnelParams): Flow<TunnelEvent> = channelFlow {
         val firstReady = CompletableDeferred<String>()
         val readyCount = AtomicInteger(0)
+        val settledCount = AtomicInteger(0)
+        val firstRelayAddr = AtomicReference("")
         toServerPackets.set(0)
         fromServerPackets.set(0)
+
+        fun onSettle() {
+            val settled = settledCount.incrementAndGet()
+            if (settled == params.nConnections) {
+                val ready = readyCount.get()
+                val relay = firstRelayAddr.get()
+                // If some but not all connected, emit a final event so the caller can transition.
+                if (ready in 1 until params.nConnections) {
+                    trySend(
+                        TunnelEvent.ConnectionReady(
+                            ready,
+                            params.nConnections,
+                            relay,
+                            allSettled = true
+                        )
+                    )
+                }
+                // ready == 0 → all failed, ProxyService gets the exception from firstReady
+                // ready == total → already emitted from onReady, no extra event needed
+            }
+        }
 
         coroutineScope {
             // First connection: full step logging, signals firstReady when DTLS is up
@@ -76,13 +99,17 @@ class TurnProxyEngine(
                     connIndex = 1, params = params,
                     firstReady = firstReady,
                     onReady = { relayAddr ->
+                        firstRelayAddr.compareAndSet("", relayAddr)
                         val c = readyCount.incrementAndGet()
                         trySend(TunnelEvent.ConnectionReady(c, params.nConnections, relayAddr))
+                        onSettle()
                     },
+                    onFailed = ::onSettle,
                 )
             }
 
             val relayAddr = firstReady.await()
+            firstRelayAddr.compareAndSet("", relayAddr)
             send(TunnelEvent.FirstReady(relayAddr))
 
             // Remaining N-1 connections, staggered apart
@@ -95,7 +122,9 @@ class TurnProxyEngine(
                         onReady = { _ ->
                             val c = readyCount.incrementAndGet()
                             trySend(TunnelEvent.ConnectionReady(c, params.nConnections, relayAddr))
+                            onSettle()
                         },
+                        onFailed = ::onSettle,
                     )
                 }
             }
@@ -109,10 +138,20 @@ class TurnProxyEngine(
         params: TunnelParams,
         firstReady: CompletableDeferred<String>?,
         onReady: (String) -> Unit,
+        onFailed: () -> Unit = {},
     ) {
         val isFirst = firstReady != null
         val tag = "[$connIndex/${params.nConnections}]"
         val startMs = System.currentTimeMillis()
+        var didConnect = false
+
+        // Wrap onReady to track successful connection
+        val onReadyTracked: (String) -> Unit = { relayAddr ->
+            didConnect = true
+            onReady(relayAddr)
+        }
+
+        try {
 
         // Step 1: credentials
         if (isFirst) trySend(TunnelEvent.StepChanged("Resolving DNS"))
@@ -158,14 +197,14 @@ class TurnProxyEngine(
                     tag = tag, isFirst = isFirst, startMs = startMs,
                     turnClient = turnClient, relayAddr = relayAddr,
                     localSocket = params.localSocket,
-                    firstReady = firstReady, onReady = onReady,
+                    firstReady = firstReady, onReady = onReadyTracked,
                 )
             } else {
                 runPlainRelay(
                     tag = tag, isFirst = isFirst, startMs = startMs,
                     turnClient = turnClient, relayAddr = relayAddr,
                     localSocket = params.localSocket,
-                    firstReady = firstReady, onReady = onReady,
+                    firstReady = firstReady, onReady = onReadyTracked,
                 )
             }
         } catch (e: Exception) {
@@ -173,6 +212,10 @@ class TurnProxyEngine(
             firstReady?.completeExceptionally(e)
         } finally {
             turnClient.close()
+        }
+
+        } finally {
+            if (!didConnect) onFailed()
         }
     }
 

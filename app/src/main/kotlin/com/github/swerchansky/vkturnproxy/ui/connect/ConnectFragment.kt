@@ -1,11 +1,18 @@
 package com.github.swerchansky.vkturnproxy.ui.connect
 
+import android.annotation.SuppressLint
+import android.app.Dialog
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.lifecycle.ViewModelProvider
 import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.databinding.FragmentConnectBinding
@@ -76,6 +83,8 @@ class ConnectFragment : BaseFragment() {
                     Unit // handled by MainActivity
                 ConnectSideEffect.ShowQuickOptions ->
                     showQuickOptionsSheet()
+                is ConnectSideEffect.ShowCaptchaDialog ->
+                    showCaptchaDialog(effect.captchaUrl)
             }
         }
     }
@@ -153,6 +162,103 @@ class ConnectFragment : BaseFragment() {
         }
         sheet.setContentView(view)
         sheet.show()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showCaptchaDialog(captchaUrl: String) {
+        val dialog = Dialog(requireContext(), android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val webView = WebView(requireContext())
+
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            userAgentString =
+                "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        }
+
+        webView.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun log(msg: String) {
+                android.util.Log.d("VkCaptchaWebView", msg)
+            }
+        }, "AndroidLog")
+
+        webView.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun VKCaptchaGetResult(json: String) {
+                try {
+                    val token = org.json.JSONObject(json).optString("token")
+                    if (token.isNotEmpty()) {
+                        activity?.runOnUiThread {
+                            dialog.dismiss()
+                            viewModel.handleIntent(ConnectIntent.CaptchaCompleted(token))
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("VkCaptchaWebView", "Failed to parse: $json", e)
+                }
+            }
+        }, "vkBridge")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                val js = """
+(function() {
+    if (window._vkIntercepted) return;
+    window._vkIntercepted = true;
+    AndroidLog.log('interceptor injected');
+    function tryExtractToken(text) {
+        try { var r = JSON.parse(text); return r && r.response && r.response.success_token || null; }
+        catch(e) { return null; }
+    }
+    var origOpen = XMLHttpRequest.prototype.open;
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url) {
+        this._vkUrl = url; return origOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function(body) {
+        var xhr = this;
+        xhr.addEventListener('load', function() {
+            if (xhr._vkUrl && xhr._vkUrl.indexOf('captchaNotRobot.check') >= 0) {
+                AndroidLog.log('XHR check: ' + xhr.responseText.substring(0, 200));
+                var t = tryExtractToken(xhr.responseText);
+                if (t) { AndroidLog.log('XHR: got success_token!'); vkBridge.VKCaptchaGetResult(JSON.stringify({token: t})); }
+            }
+        });
+        return origSend.apply(this, arguments);
+    };
+    var origFetch = window.fetch;
+    if (origFetch) window.fetch = function(input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        return origFetch.apply(this, arguments).then(function(resp) {
+            if (url.indexOf('captchaNotRobot.check') >= 0) {
+                resp.clone().text().then(function(text) {
+                    AndroidLog.log('fetch check: ' + text.substring(0, 200));
+                    var t = tryExtractToken(text);
+                    if (t) { AndroidLog.log('fetch: got success_token!'); vkBridge.VKCaptchaGetResult(JSON.stringify({token: t})); }
+                });
+            }
+            return resp;
+        });
+    };
+})();
+"""
+                view.evaluateJavascript(js, null)
+            }
+        }
+
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                dialog.dismiss()
+                viewModel.handleIntent(ConnectIntent.CaptchaCancelled)
+                true
+            } else false
+        }
+        dialog.setOnDismissListener { webView.destroy() }
+        dialog.setContentView(webView)
+        webView.loadUrl(captchaUrl)
+        dialog.show()
     }
 
     override fun onDestroyView() {

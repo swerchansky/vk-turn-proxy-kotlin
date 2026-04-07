@@ -8,4 +8,5 @@ sealed class ConnectSideEffect {
     object OpenConnectionDetail : ConnectSideEffect()
     object RequestNotificationPermission : ConnectSideEffect()
     object ShowQuickOptions : ConnectSideEffect()
+    data class ShowCaptchaDialog(val captchaUrl: String) : ConnectSideEffect()
 }

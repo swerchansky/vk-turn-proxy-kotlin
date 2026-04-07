@@ -12,8 +12,8 @@ android {
         applicationId = "com.github.swerchansky.vkturnproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 102001
-        versionName = "1.2.1"
+        versionCode = 103000
+        versionName = "1.3.0"
     }
 
     buildFeatures {

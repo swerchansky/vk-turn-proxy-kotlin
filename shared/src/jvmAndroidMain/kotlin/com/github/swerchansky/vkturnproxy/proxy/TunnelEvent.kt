@@ -8,10 +8,12 @@ sealed class TunnelEvent {
     /** First connection is fully established (DTLS handshake complete). */
     data class FirstReady(val relayAddr: String) : TunnelEvent()
 
-    /** Any connection became ready. */
+    /** Any connection became ready, or setup is fully settled (some may have failed). */
     data class ConnectionReady(
         val count: Int,
         val total: Int,
         val relayAddr: String,
+        /** True when all connections have either connected or failed (setup is complete). */
+        val allSettled: Boolean = false,
     ) : TunnelEvent()
 }
