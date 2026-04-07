@@ -1,7 +1,6 @@
 package com.github.swerchansky.vkturnproxy.ui.main
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -14,7 +13,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.isVisible
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentTransaction
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -23,8 +23,6 @@ import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
 import com.github.swerchansky.vkturnproxy.databinding.ActivityMainBinding
 import com.github.swerchansky.vkturnproxy.navigation.Screens
-import androidx.fragment.app.Fragment
-import androidx.fragment.app.FragmentTransaction
 import com.github.terrakok.cicerone.NavigatorHolder
 import com.github.terrakok.cicerone.Router
 import com.github.terrakok.cicerone.androidx.AppNavigator
@@ -54,9 +52,6 @@ class MainActivity : AppCompatActivity() {
                     R.anim.fade_out,
                 )
                 
-                // Hide bottom nav on onboarding
-                val isOnboarding = nextFragment is com.github.swerchansky.vkturnproxy.ui.onboarding.OnboardingFragment
-                binding.bottomNav.isVisible = !isOnboarding
             }
         }
     }
@@ -87,12 +82,7 @@ class MainActivity : AppCompatActivity() {
         applySystemBarAppearance()
 
         if (savedInstanceState == null) {
-            val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("onboarding_finished", false)) {
-                router.replaceScreen(Screens.connect())
-            } else {
-                router.replaceScreen(Screens.onboarding())
-            }
+            router.replaceScreen(Screens.connect())
         }
 
         setupBottomNav()

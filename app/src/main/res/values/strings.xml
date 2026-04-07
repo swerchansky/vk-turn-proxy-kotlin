@@ -3,17 +3,6 @@
     <string name="app_name">vk-turn-proxy</string>
     <string name="app_subtitle">TURN tunnel for WireGuard</string>
 
-    <!-- Onboarding -->
-    <string name="next">Next</string>
-    <string name="skip">Skip</string>
-    <string name="get_started">Get Started</string>
-    <string name="onboarding_title_1">Welcome!</string>
-    <string name="onboarding_desc_1">vk-turn-proxy allows you to use WireGuard through VK Video Call infrastructure.</string>
-    <string name="onboarding_title_2">How to use</string>
-    <string name="onboarding_desc_2">1. Create a VK Video Call\n2. Copy the join link\n3. Paste it in the app and connect!</string>
-    <string name="onboarding_title_3">Configuration</string>
-    <string name="onboarding_desc_3">Enter your server address and port. You can save your favorite servers for quick access.</string>
-
     <!-- Connect screen -->
     <string name="connection_settings">Connection</string>
     <string name="hint_link">VK conference link</string>
