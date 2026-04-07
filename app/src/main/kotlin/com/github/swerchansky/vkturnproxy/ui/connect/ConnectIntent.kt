@@ -15,4 +15,6 @@ sealed class ConnectIntent {
     object StarButtonClicked : ConnectIntent()
     object QuickOptionsRequested : ConnectIntent()
     data class QuickOptionsNConnectionsSet(val n: Int) : ConnectIntent()
+    data class CaptchaCompleted(val successToken: String) : ConnectIntent()
+    object CaptchaCancelled : ConnectIntent()
 }

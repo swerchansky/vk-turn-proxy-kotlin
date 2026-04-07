@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import com.github.swerchansky.vkturnproxy.data.preferences.AppPreferences
 import com.github.swerchansky.vkturnproxy.data.repository.ProxyRepository
 import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
+import com.github.swerchansky.vkturnproxy.service.ProxyService
 import com.github.swerchansky.vkturnproxy.ui.base.BaseViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -73,6 +74,11 @@ class ConnectViewModel @Inject constructor(
             appPreferences.nConnections = intent.n
             updateState { copy(nConnections = intent.n) }
         }
+        is ConnectIntent.CaptchaCompleted ->
+            ProxyService.submitCaptchaResult(intent.successToken)
+
+        ConnectIntent.CaptchaCancelled ->
+            ProxyService.cancelCaptcha()
     }
 
     private fun observeRepository() {
@@ -81,6 +87,8 @@ class ConnectViewModel @Inject constructor(
                 updateState { copy(connectionState = state) }
                 when (state) {
                     is ProxyConnectionState.Connected -> startTimer()
+                    is ProxyConnectionState.CaptchaRequired ->
+                        emitSideEffect(ConnectSideEffect.ShowCaptchaDialog(state.captchaUrl))
                     else -> stopTimer()
                 }
             }

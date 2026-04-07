@@ -11,6 +11,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.github.swerchansky.vkturnproxy.App
 import com.github.swerchansky.vkturnproxy.R
+import com.github.swerchansky.vkturnproxy.credentials.vk.VkCaptchaHandler
 import com.github.swerchansky.vkturnproxy.credentials.vk.VkCredentialProvider
 import com.github.swerchansky.vkturnproxy.domain.ProxyConnectionState
 import com.github.swerchansky.vkturnproxy.domain.ProxyStats
@@ -21,6 +22,7 @@ import com.github.swerchansky.vkturnproxy.proxy.TurnProxyEngine
 import com.github.swerchansky.vkturnproxy.proxy.formatTurnProxyDuration
 import com.github.swerchansky.vkturnproxy.proxy.parseTurnProxyAddr
 import com.github.swerchansky.vkturnproxy.ui.main.MainActivity
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +31,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.text.SimpleDateFormat
@@ -53,6 +57,39 @@ class ProxyService : Service() {
         const val EXTRA_PORT = "port"
         const val EXTRA_N = "n_connections"
 
+        @Volatile
+        private var captchaDeferred: CompletableDeferred<String>? = null
+        @Volatile
+        private var captchaCancelled = false
+        private val captchaMutex = Mutex()
+
+        // Tracked while runProxy is active so cancelCaptcha() can transition immediately.
+        @Volatile
+        private var liveReadyCount = 0
+        @Volatile
+        private var liveTotalConnections = 0
+        @Volatile
+        private var liveRelayAddr = ""
+
+        fun submitCaptchaResult(successToken: String) {
+            captchaDeferred?.complete(successToken)
+        }
+
+        fun cancelCaptcha() {
+            captchaCancelled = true
+            captchaDeferred?.completeExceptionally(CaptchaSkippedException())
+            // Immediately transition to Connected/Idle so the UI isn't stuck in Connecting
+            // while the remaining connections time out in the background.
+            val ready = liveReadyCount
+            val total = liveTotalConnections
+            val relay = liveRelayAddr
+            if (ready > 0 && relay.isNotEmpty()) {
+                state.value = ProxyConnectionState.Connected(relay, ready, total)
+            }
+        }
+
+        class CaptchaSkippedException : Exception("Captcha skipped by user")
+
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "proxy_channel"
 
@@ -74,6 +111,8 @@ class ProxyService : Service() {
 
     @Inject
     lateinit var credentialProvider: VkCredentialProvider
+    @Inject
+    lateinit var captchaHandler: VkCaptchaHandler
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var proxyJob: Job? = null
@@ -182,12 +221,29 @@ class ProxyService : Service() {
             .createNotificationChannel(channel)
     }
 
+    @Suppress("LongMethod")
     private suspend fun runProxy(
         rawLink: String,
         peerAddress: String,
         listenPort: Int,
         nConnections: Int,
     ) {
+        captchaDeferred = null
+        captchaCancelled = false
+        liveReadyCount = 0
+        liveTotalConnections = if (nConnections > 0) nConnections else 16
+        liveRelayAddr = ""
+        captchaHandler.onFallbackRequired = { captchaUrl ->
+            if (captchaCancelled) throw CaptchaSkippedException()
+            val myDeferred = CompletableDeferred<String>()
+            captchaMutex.withLock {
+                if (captchaCancelled) throw CaptchaSkippedException()
+                captchaDeferred = myDeferred
+                state.value = ProxyConnectionState.CaptchaRequired(captchaUrl)
+                myDeferred.await()
+            }
+        }
+
         val peerAddr = parseTurnProxyAddr(peerAddress)
         val n = if (nConnections > 0) nConnections else 16
         val sessionStartMs = System.currentTimeMillis()
@@ -246,6 +302,7 @@ class ProxyService : Service() {
 
                         is TunnelEvent.FirstReady -> {
                             relayAddrRef.set(event.relayAddr)
+                            liveRelayAddr = event.relayAddr
                             val connectedAt = System.currentTimeMillis()
                             appendLog(
                                 "Tunnel up in ${formatTurnProxyDuration(connectedAt - sessionStartMs)}" +
@@ -259,10 +316,19 @@ class ProxyService : Service() {
 
                         is TunnelEvent.ConnectionReady -> {
                             readyCountRef.set(event.count)
-                            if (event.count >= event.total) {
-                                appendLog("All ${event.total}/${event.total} connections established")
-                                state.value = ProxyConnectionState.Connected(event.relayAddr)
-                                updateNotification("Connected ×${event.total} — ${event.relayAddr}")
+                            liveReadyCount = event.count
+                            if (liveRelayAddr.isEmpty()) liveRelayAddr = event.relayAddr
+                            val done = event.count >= event.total || event.allSettled
+                            if (done) {
+                                val msg = if (event.count < event.total)
+                                    "${event.count}/${event.total} connections established (${event.total - event.count} failed)"
+                                else
+                                    "All ${event.total}/${event.total} connections established"
+                                appendLog(msg)
+                                state.value = ProxyConnectionState.Connected(
+                                    event.relayAddr, event.count, event.total
+                                )
+                                updateNotification("Connected ×${event.count} — ${event.relayAddr}")
                             } else {
                                 state.value = ProxyConnectionState.Connecting(
                                     "Establishing connections", event.count, event.total
@@ -291,6 +357,8 @@ class ProxyService : Service() {
             state.value = ProxyConnectionState.Error(msg)
             updateNotification("Error")
         } finally {
+            captchaHandler.onFallbackRequired = null
+            captchaDeferred = null
             socket.close()
             @Suppress("DEPRECATION")
             stopForeground(true)
